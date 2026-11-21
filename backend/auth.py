@@ -41,6 +41,7 @@ def is_subscriber(user_id, bot_token, chat_id):
             headers={'Authorization': bot_token},
             timeout=(5, 12),
             allow_redirects=False,
+            verify=os.getenv('MAX_CA_BUNDLE') or True,
         )
         if r.status_code != 200:
             # Never return the upstream response or request URL; both may contain personal data.
