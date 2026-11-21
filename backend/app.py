@@ -73,8 +73,39 @@ def signin(payload:SignIn):
         if config.flag('REQUIRE_CHANNEL_SUBSCRIPTION','1'):
             if not auth.is_subscriber(uid,os.environ['MAX_BOT_TOKEN'],os.getenv('MAX_CHANNEL_ID')):
                 raise HTTPException(403,'Подпишитесь на канал MAX для доступа')
-        db().register(uid,3000 if config.flag('WELCOME_BONUS_ENABLED','1') else 0)
-        return {'token':auth.mint(uid),'user_id':uid,'admin':uid in config.admin_ids()}
+        try:
+            db().register(
+                uid,
+                3000 if config.flag('WELCOME_BONUS_ENABLED', '1') else 0
+            )
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception(
+                "YDB registration failed"
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="YDB_REGISTER_FAILED"
+            ) from exc
+
+        try:
+            token = auth.mint(uid)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception(
+                "Session creation failed"
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="SESSION_CREATE_FAILED"
+            ) from exc
+
+        return {
+            'token': token,
+            'user_id': uid,
+            'admin': uid in config.admin_ids()
+        }
+
     except auth.AuthError as exc:raise HTTPException(401,str(exc)) from exc
 
 @app.get('/api/profile')
