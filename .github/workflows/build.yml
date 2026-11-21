@@ -31,6 +31,34 @@ jobs:
           docker build \
             -f deploy/Dockerfile \
             -t cr.yandex/${{ secrets.YC_REGISTRY_ID }}/generator-kartinok:latest .
+          
+      - name: Test Docker startup
+        run: |
+          IMAGE="cr.yandex/${{ secrets.YC_REGISTRY_ID }}/generator-kartinok:latest"
+
+          echo "Checking Python imports..."
+          docker run --rm "$IMAGE" \
+            python -c "from main import app; print('IMPORT OK')"
+
+          echo "Starting API..."
+          docker run -d \
+            --name generator-test \
+            -p 8080:8080 \
+            "$IMAGE"
+
+          sleep 8
+
+          echo "Checking API health..."
+          if curl --fail --silent --show-error \
+            http://localhost:8080/api/health; then
+            echo "API STARTED SUCCESSFULLY"
+          else
+            echo "API STARTUP FAILED"
+            docker logs generator-test
+            exit 1
+          fi
+
+          docker stop generator-test
 
       - name: Push Docker image
         run: |
