@@ -1,0 +1,31 @@
+name: Build and Push Docker to Yandex Cloud
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Login to Yandex Container Registry
+        run: |
+          echo "${{ secrets.YC_SA_KEY }}" | docker login \
+            --username json_key \
+            --password-stdin cr.yandex
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -f deploy/Dockerfile \
+            -t cr.yandex/${{ secrets.YC_REGISTRY_ID }}/generator-kartinok:latest .
+
+      - name: Push Docker image
+        run: |
+          docker push \
+            cr.yandex/${{ secrets.YC_REGISTRY_ID }}/generator-kartinok:latest
