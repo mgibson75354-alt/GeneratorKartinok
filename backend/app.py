@@ -3,8 +3,6 @@ from __future__ import annotations
 import os
 import json
 import uuid
-import hmac
-import re
 from functools import lru_cache
 from io import BytesIO
 from typing import Literal
@@ -66,48 +64,6 @@ class Resolve(BaseModel):
 
 @app.get('/api/health')
 def health():return {'status':'ok','project':'image-generator','database':'ydb'}
-
-# Temporary, read-only YDB diagnostic endpoint. Disabled unless explicitly configured.
-# Call from a terminal (not an in-browser frontend) to avoid exposing the key.
-@app.get('/api/diag/ydb')
-def diagnose_ydb(x_diagnostic_key: str | None = Header(None, alias='X-Diagnostic-Key')):
-    secret = os.getenv('YDB_DIAG_TOKEN', '')
-    if len(secret) < 32 or not x_diagnostic_key or not hmac.compare_digest(secret, x_diagnostic_key):
-        # Identical response whether feature is disabled or credentials are incorrect.
-        raise HTTPException(404, 'Not found')
-
-    checks = []
-
-    def test(label, fn):
-        try:
-            fn()
-            checks.append({'check': label, 'status': 'ok'})
-            return True
-        except Exception as exc:
-            # No exception message: it can contain endpoint, SQL, IDs or other private data.
-            name = type(exc).__name__
-            checks.append({'check': label, 'status': 'failed',
-                           'exception_class': name if re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]{0,79}', name) else 'UnknownError'})
-            return False
-
-    if not test('driver_and_pool', lambda: db()):
-        return {'status': 'failed', 'checks': checks}
-
-    store = db()
-    if not test('query_service', lambda: store.query('SELECT 1 AS probe')):
-        return {'status': 'failed', 'checks': checks}
-
-    for name in ('igk_wallets', 'igk_bonus_awards', 'igk_movements'):
-        if not test('read_' + name, lambda table=name: store.query('SELECT 1 AS probe FROM ' + table + ' LIMIT 1')):
-            return {'status': 'failed', 'checks': checks}
-
-    # Exercises the same QuerySerializableReadWrite transaction helper as register(),
-    # but executes SELECT only: no insert, update, bonus award or balance changes.
-    if not test('registration_transaction_read',
-                lambda: store.transaction(lambda tx: store.run(
-                    tx, 'SELECT available, held FROM igk_wallets WHERE user_id=$u', u='0'))):
-        return {'status': 'failed', 'checks': checks}
-    return {'status': 'ok', 'checks': checks}
 
 @app.post('/api/auth')
 def signin(payload:SignIn):
