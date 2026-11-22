@@ -31,7 +31,7 @@ jobs:
           docker build \
             -f deploy/Dockerfile \
             -t cr.yandex/${{ secrets.YC_REGISTRY_ID }}/generator-kartinok:latest .
-          
+
       - name: Test Docker startup
         run: |
           IMAGE="cr.yandex/${{ secrets.YC_REGISTRY_ID }}/generator-kartinok:latest"
@@ -46,7 +46,13 @@ jobs:
             -p 8080:8080 \
             "$IMAGE"
 
-          sleep 8
+          for i in {1..20}; do
+               if curl --fail --silent http://localhost:8080/api/health > /dev/null; then
+              echo "API is ready"
+              break
+            fi
+            sleep 1
+          done
 
           echo "Checking API health..."
           if curl --fail --silent --show-error \
