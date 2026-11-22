@@ -1,79 +1,330 @@
 'use strict';
-const $=id=>document.getElementById(id);
-const base=(window.APP_CONFIG?.API_BASE||'').replace(/\/$/,'');
-let token='',active=false,referenceKey='',busy=false;
-const escaped=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const credits=k=>(Number(k||0)/1000).toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2})+' кредитов';
-async function api(path,opts={}){
- const res=await fetch(base+path,{...opts,headers:{'X-App-Authorization':`Bearer ${token}`,...(opts.headers||{})}});
- let data;try{data=await res.json()}catch{throw Error(`HTTP ${res.status}`)}
- if(!res.ok)throw Error(typeof data.detail==='string'?data.detail:`HTTP ${res.status}`);
- return data;
-}
-function error(message){$('message').textContent=message;$('message').classList.add('error')}
-function status(message){$('message').textContent=message;$('message').classList.remove('error')}
-function check(){ $('generate').disabled=!active||busy||!$('rights').checked||$('prompt').value.trim().length<10||( $('mode').value==='reference'&&!referenceKey ); }
-async function login(){
- $('retry').classList.add('hidden');$('gate-title').textContent='Проверяем доступ…';
- try{
-   const raw=window.WebApp?.initData;
-   if(!raw)throw Error('Откройте мини-приложение кнопкой внутри MAX, не прямой ссылкой.');
-   const r=await fetch(base+'/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:raw})});
-   const data=await r.json();if(!r.ok)throw Error(data.detail||'Ошибка входа'); token=data.token;
-   await refresh();$('gate').classList.add('hidden');$('workspace').classList.remove('hidden');
- }catch(e){ $('gate-title').textContent='Доступ не подтверждён';$('gate-message').textContent=e.message;$('retry').classList.remove('hidden'); }
-}
-async function refresh(){
- const data=await api('/api/profile');active=data.generation_enabled;
- const selector=$('provider-block');
- selector.classList.toggle('hidden',!data.provider_selector_visible);
- $('provider-audit-panel').classList.toggle('hidden',!data.admin);
- const allowed=data.available_providers||[];
- $('provider').querySelectorAll('option').forEach(o=>{o.disabled=!allowed.includes(o.value)});
- if(!data.provider_selector_visible || !allowed.includes($('provider').value)) $('provider').value= data.provider_default||'proxyapi';
- $('balance').textContent=credits(data.wallet.available);$('price').textContent=credits(data.price);
- if(!active)status('Генерация ещё не включена администратором.');
- check();const h=await api('/api/history');renderHistory(h);
-}
-function renderHistory(data){
- $('history').innerHTML=(!data.jobs.length)?'История пока пуста.':data.jobs.map(j=>`<div class="history-item"><div><strong>${escaped(j.prompt).slice(0,120)}</strong><div><span>${escaped(j.created_at)} · ${escaped(j.status)} · ${credits(j.price)}</span></div></div>${j.image_url?`<a target="_blank" rel="noopener noreferrer" href="${escaped(j.image_url)}">Открыть</a>`:''}</div>`).join('');
- $('movements').innerHTML=(!data.movements.length)?'Операций пока нет.':data.movements.map(m=>`<div class="history-item"><div>${escaped(m.note||m.kind)}<div><span>${escaped(m.created_at)}</span></div></div><strong>${m.amount>=0?'+':''}${credits(m.amount)}</strong></div>`).join('');
-}
-async function loadProviderAudit(){
- const el=$('provider-audit-list');el.textContent='Загрузка журнала…';
- try{
-  const response=await api('/api/admin/provider-usage');
-  el.innerHTML=(!response.items.length)?'Генераций пока нет.':response.items.map(x=>{
-   const usage=x.usage||{};
-   const reapiCredits=typeof usage.credits==='number'?` · ${usage.credits} кредитов reAPI ($${(usage.credits*.001).toFixed(3)})`:'';
-   const usageText=Object.keys(usage).length?JSON.stringify(usage).slice(0,240):'Использование не указано в API';
-   return `<div class="history-item"><div><strong>${escaped(x.provider)} · ${escaped(x.status)}</strong><div><span>${escaped(x.updated_at)} · ${escaped(x.model||'—')} · ${Number(x.seconds||0)/1000} с${reapiCredits}</span></div><div><span>${escaped(usageText)}</span></div><div><span>ID: ${escaped(x.job_id)} ${escaped(x.task_id||'')}</span></div></div></div>`;
-  }).join('');
- }catch(e){el.textContent='Ошибка журнала: '+e.message;}
-}
-$('provider-audit-refresh').onclick=loadProviderAudit;
-$('retry').onclick=login;
-$('prompt').addEventListener('input',()=>{$('prompt-length').textContent=$('prompt').value.length+' / 1800';check()});
-$('rights').onchange=check;
-$('mode').onchange=()=>{referenceKey='';$('reference').value='';$('reference-panel').classList.toggle('hidden',$('mode').value!=='reference');check()};
-$('reference').onchange=async()=>{
- referenceKey='';const file=$('reference').files[0];if(!file){check();return}
- if(file.size>8*1024*1024){error('Файл больше 8 МБ');check();return}
- $('reference-status').textContent='Загружаем референс…';const form=new FormData();form.append('file',file);
- try{const data=await api('/api/reference',{method:'POST',body:form});referenceKey=data.reference_key;$('reference-preview').src=data.preview_url;$('reference-preview').classList.remove('hidden');$('reference-status').textContent='Референс загружен';}catch(e){error(e.message)}check();
+// IGK v12: financial history behaves like the Restorer's ledger.
+// The source of truth for money remains YDB; never infer a second debit on "payment".
+const $ = id => document.getElementById(id);
+const base = (window.APP_CONFIG?.API_BASE || '').replace(/\/$/, '');
+const credits = kopeks => (Number(kopeks || 0) / 1000).toLocaleString('ru-RU', {
+  minimumFractionDigits: 2, maximumFractionDigits: 2
+}) + ' кредита';
+const rubles = kopeks => (Number(kopeks || 0) / 100).toLocaleString('ru-RU', {
+  style: 'currency', currency: 'RUB'
+});
+const formatDate = date => {
+  const d = new Date(date);
+  return !date || !Number.isFinite(d.getTime()) ? 'Дата неизвестна' : d.toLocaleDateString('ru-RU');
 };
-$('generate').onclick=async()=>{
- check();if($('generate').disabled)return;busy=true;check();status('Генерация выполняется. Не закрывайте приложение…');
- try{
-  const p={request_id:crypto.randomUUID(),provider:$('provider').value,prompt:$('prompt').value.trim(),style:$('style').value,aspect:$('aspect').value,mode:$('mode').value,reference_key:referenceKey,confirm_rights:$('rights').checked};
-  const data=await api('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
-  if(data.status==='completed'&&data.image_url){$('result-image').src=data.image_url;$('download').href=data.image_url;$('result-panel').classList.remove('hidden');status('Изображение создано!');$('result-panel').scrollIntoView({behavior:'smooth'});}else{status('Задание принято. Статус: '+data.status+'; повторный запуск не требуется.');}
-  await refresh();
- }catch(e){error(e.message);try{await refresh()}catch{}}finally{busy=false;check()}
+const formatTime = date => {
+  const d = new Date(date);
+  return !date || !Number.isFinite(d.getTime()) ? '—:—' : d.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'});
 };
-$('new-image').onclick=()=>{$('result-panel').classList.add('hidden');$('rights').checked=false;check();window.scrollTo({top:0,behavior:'smooth'})};
-document.querySelectorAll('[data-legal]').forEach(a=>a.addEventListener('click',e=>{
- e.preventDefault();$('legal-frame').src=a.getAttribute('href');$('legal-overlay').classList.remove('hidden');
+const statusName = s => ({completed:'Готово', failed:'Ошибка', unknown:'Требуется проверка',
+  reserved:'В обработке', pending:'В обработке', cancelled:'Отменено'}[s] || 'В обработке');
+const kindName = kind => ({text:'По тексту', reference:'По фотографии'}[kind] || 'Генерация');
+const safeHttps = value => {
+  try { const url = new URL(value); return url.protocol === 'https:' ? url.href : ''; }
+  catch { return ''; }
+};
+const el = (tag, className = '', content = '') => {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  node.textContent = content;
+  return node;
+};
+
+let token = '', active = false, referenceKey = '', busy = false, pendingRequestId = '';
+let currentHistory = {jobs:[], movements:[]};
+let currentWallet = {available:0, held:0};
+let paymentOrdersById = new Map();
+const HISTORY_FIRST_PAGE = 10, MOVEMENT_FIRST_PAGE = 15;
+let visibleJobs = HISTORY_FIRST_PAGE, visibleMovements = MOVEMENT_FIRST_PAGE;
+
+async function api(path, opts = {}) {
+  const res = await fetch(base + path, {
+    ...opts,
+    headers: {'X-App-Authorization': `Bearer ${token}`, ...(opts.headers || {})}
+  });
+  let data;
+  try { data = await res.json(); } catch { throw Error(`HTTP ${res.status}`); }
+  if (!res.ok) throw Error(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`);
+  return data;
+}
+function message(value, isError = false) {
+  $('message').textContent = value;
+  $('message').classList.toggle('error', isError);
+}
+function check() {
+  $('generate').disabled = !active || !token || busy || !$('rights').checked ||
+    $('prompt').value.trim().length < 10 || ($('mode').value === 'reference' && !referenceKey);
+}
+async function login() {
+  $('retry').classList.add('hidden');
+  $('gate-title').textContent = 'Проверяем доступ…';
+  try {
+    const init = window.WebApp?.initData;
+    if (!init) throw Error('Откройте мини-приложение кнопкой внутри MAX, не прямой ссылкой.');
+    const response = await fetch(base + '/api/auth', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({init_data:init})
+    });
+    const data = await response.json();
+    if (!response.ok) throw Error(data.detail || 'Ошибка входа');
+    token = data.token;
+    await refresh();
+    $('gate').classList.add('hidden');
+    $('workspace').classList.remove('hidden');
+  } catch (err) {
+    $('gate-title').textContent = 'Доступ не подтверждён';
+    $('gate-message').textContent = err.message;
+    $('retry').classList.remove('hidden');
+  }
+}
+async function refresh() {
+  const profile = await api('/api/profile');
+  currentWallet = profile.wallet || {available:0, held:0};
+  // With PROVIDER_SELECTOR_VISIBLE=0 the backend enforces PROVIDER_DEFAULT=reapi.
+  active = profile.generation_enabled === true && (profile.available_providers || []).includes('reapi') &&
+    (profile.provider_selector_visible === true || profile.provider_default === 'reapi');
+  $('provider-audit-panel').classList.toggle('hidden', !profile.admin);
+  $('balance').textContent = credits(currentWallet.available);
+  $('price').textContent = credits(profile.price);
+  if (!active) message('Генерация через reAPI не включена в настройках сервера.', true);
+  check();
+  const history = await api('/api/history');
+  currentHistory = {jobs:Array.isArray(history.jobs) ? history.jobs : [],
+    movements:Array.isArray(history.movements) ? history.movements : []};
+  // Optional: a paid topup can include a number or HTTPS link to the NPD receipt.
+  if (profile.payments_enabled === true) {
+    try {
+      const orders = await api('/api/payments/orders');
+      paymentOrdersById = new Map((orders.orders || []).map(order => [order.order_id, order]));
+    } catch { paymentOrdersById = new Map(); }
+  } else {
+    paymentOrdersById = new Map();
+  }
+  renderHistory();
+}
+
+async function openHistoryJob(job) {
+  if (job.status !== 'completed') {
+    message('Задание: ' + statusName(job.status) + '. Результат пока недоступен.', job.status === 'failed');
+    return;
+  }
+  try {
+    // A fresh API call renews the ten-minute signed Object Storage URL.
+    const response = await api('/api/history');
+    const fresh = (response.jobs || []).find(j => j.job_id === job.job_id);
+    const image = safeHttps(fresh?.image_url);
+    if (!image) throw Error('Ссылка на изображение недоступна. Обновите историю.');
+    $('result-image').src = image;
+    $('download').href = image;
+    $('result-panel').classList.remove('hidden');
+    message('Сохранённое изображение открыто из архива.');
+    $('result-panel').scrollIntoView({behavior:'smooth'});
+  } catch (err) { message(err.message, true); }
+}
+
+function renderJobs() {
+  const container = $('history');
+  container.replaceChildren();
+  for (const job of currentHistory.jobs.slice(0, visibleJobs)) {
+    const row = el('button', 'history-item history-job');
+    row.type = 'button';
+    const left = el('span', 'history-job-body');
+    left.append(el('strong', 'history-job-title', `${kindName(job.kind)} · Пропорции ${job.aspect || '—'}`));
+    left.append(el('span', 'history-job-meta', `${formatTime(job.created_at)} · ${formatDate(job.created_at)} · ${statusName(job.status)} · ${credits(job.price)}`));
+    left.append(el('span', 'history-job-prompt', String(job.prompt || '').slice(0, 150)));
+    row.append(left, el('span', 'history-job-action', job.status === 'completed' ? 'Открыть' : 'Статус'));
+    row.addEventListener('click', () => { void openHistoryJob(job); });
+    container.append(row);
+  }
+  if (!currentHistory.jobs.length) container.textContent = 'История пока пуста.';
+  const remainder = Math.max(0, currentHistory.jobs.length - visibleJobs);
+  $('history-more').classList.toggle('hidden', remainder === 0);
+  $('history-more').textContent = `Показать ещё генерации (${remainder})`;
+}
+
+function renderMovements() {
+  const container = $('movements');
+  container.replaceChildren();
+  const byJob = new Map(currentHistory.jobs.map(j => [j.job_id, j]));
+  // Some historic jobs were removed while retaining the financial ledger.
+  // Recover the charged price from a matching reserve movement when possible.
+  const reservedByReference = new Map();
+  for (const m of currentHistory.movements) {
+    if (m.kind === 'reserve' && m.reference) reservedByReference.set(m.reference, Math.abs(Number(m.amount || 0)));
+  }
+  let availableAfter = Number(currentWallet.available || 0);
+  const rows = currentHistory.movements.map(m => {
+    const after = availableAfter;
+    // Amounts in this ledger are signed changes to AVAILABLE: reserve<0,
+    // welcome/topup/release>0. Payment is amount=0 because held funds are captured.
+    if (['welcome','topup','reserve','release'].includes(m.kind)) availableAfter -= Number(m.amount || 0);
+    return {movement:m, balanceAfter:after};
+  });
+
+  for (const {movement:m, balanceAfter:after} of rows.slice(0, visibleMovements)) {
+    const job = byJob.get(m.reference);
+    const jobLabel = job ? `${kindName(job.kind)} · ${job.aspect || '—'}` : '';
+    const jobPrice = job && Number.isFinite(Number(job.price)) ? Number(job.price) : reservedByReference.get(m.reference);
+    let title, amountText, details = [];
+    switch (m.kind) {
+      case 'payment':
+        title = 'Оплата из резерва';
+        amountText = Number.isFinite(jobPrice) ? credits(jobPrice) : 'Подтверждена';
+        details.push('подтверждена');
+        break;
+      case 'reserve':
+        title = 'Резервирование средств';
+        amountText = '−' + credits(Math.abs(Number(m.amount || 0)));
+        break;
+      case 'release':
+        title = 'Возврат резерва';
+        amountText = '+' + credits(Math.abs(Number(m.amount || 0)));
+        break;
+      case 'welcome':
+        title = Number(m.amount) === 3000 ? 'Приветственные 3 кредита' : 'Приветственные кредиты';
+        amountText = '+' + credits(Math.abs(Number(m.amount || 0)));
+        break;
+      case 'topup':
+        title = 'Пополнение баланса';
+        amountText = '+' + credits(Math.abs(Number(m.amount || 0)));
+        break;
+      default:
+        title = String(m.note || m.kind || 'Операция');
+        amountText = Number(m.amount) === 0 ? 'Подтверждена' :
+          (Number(m.amount) > 0 ? '+' : '−') + credits(Math.abs(Number(m.amount || 0)));
+    }
+    const row = el('div', 'history-item movement-item');
+    const head = el('div', 'movement-head');
+    head.append(el('strong', 'movement-title', title));
+    head.append(el('span', 'movement-amount', amountText));
+    row.append(head);
+    details.unshift(`${formatDate(m.created_at)} ${formatTime(m.created_at)}`);
+    if (jobLabel) details.push(jobLabel);
+    // Show the actual price for this payment, but never add a second debit.
+    if (m.kind === 'payment' && Number.isFinite(jobPrice)) details.push(rubles(jobPrice));
+    if (['reserve','release','topup','welcome'].includes(m.kind)) details.push(rubles(Math.abs(Number(m.amount || 0))));
+    details.push(`Баланс — ${credits(after)}`);
+    row.append(el('div', 'movement-details', details.join(' · ')));
+    if (m.kind === 'topup') {
+      const receipt = paymentOrdersById.get(m.reference)?.receipt;
+      const receiptUrl = safeHttps(receipt);
+      if (receiptUrl) {
+        const link = el('a', 'receipt-link', 'Открыть чек НПД');
+        link.href = receiptUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        row.append(link);
+      } else if (receipt) {
+        row.append(el('span', 'receipt-label', `Чек НПД: ${String(receipt).slice(0, 150)}`));
+      }
+    }
+    container.append(row);
+  }
+  if (!currentHistory.movements.length) container.textContent = 'Операций пока нет.';
+  const remainder = Math.max(0, currentHistory.movements.length - visibleMovements);
+  $('movements-more').classList.toggle('hidden', remainder === 0);
+  $('movements-more').textContent = `Показать ещё операции (${remainder})`;
+}
+function renderHistory() { renderJobs(); renderMovements(); }
+
+async function loadProviderAudit() {
+  const list = $('provider-audit-list');
+  list.textContent = 'Загрузка журнала…';
+  try {
+    const data = await api('/api/admin/provider-usage');
+    list.replaceChildren();
+    for (const x of data.items || []) {
+      const usage = x.usage || {};
+      const caption = typeof usage.credits === 'number' ?
+        ` · ${usage.credits} кредитов reAPI ($${(usage.credits * .001).toFixed(3)})` : '';
+      const row = el('div', 'history-item admin-audit-item');
+      row.append(el('strong', '', `${x.provider || '—'} · ${x.status || '—'}`));
+      row.append(el('span', '', `${formatDate(x.updated_at)} ${formatTime(x.updated_at)} · ${x.model || '—'} · ${Number(x.seconds || 0) / 1000} с${caption}`));
+      row.append(el('span', '', `Задание: ${x.job_id || '—'} · ${x.task_id || '—'}`));
+      list.append(row);
+    }
+    if (!(data.items || []).length) list.textContent = 'Генераций пока нет.';
+  } catch (err) { list.textContent = 'Ошибка журнала: ' + err.message; }
+}
+
+$('provider-audit-refresh').onclick = loadProviderAudit;
+$('retry').onclick = login;
+$('history-more').onclick = () => { visibleJobs += HISTORY_FIRST_PAGE; renderJobs(); };
+$('movements-more').onclick = () => { visibleMovements += MOVEMENT_FIRST_PAGE; renderMovements(); };
+$('prompt').addEventListener('input', () => {
+  $('prompt-length').textContent = $('prompt').value.length + ' / 1800';
+  check();
+});
+$('rights').onchange = check;
+$('mode').onchange = () => {
+  referenceKey = '';
+  $('rights').checked = false;
+  $('reference').value = '';
+  $('reference-preview').classList.add('hidden');
+  $('reference-panel').classList.toggle('hidden', $('mode').value !== 'reference');
+  check();
+};
+$('reference').onchange = async () => {
+  referenceKey = '';
+  $('rights').checked = false; // A new uploaded photo requires new consent.
+  const file = $('reference').files[0];
+  if (!file) { check(); return; }
+  if (file.size > 8 * 1024 * 1024) { message('Файл больше 8 МБ', true); check(); return; }
+  $('reference-status').textContent = 'Загружаем референс…';
+  const form = new FormData(); form.append('file', file);
+  try {
+    const data = await api('/api/reference', {method:'POST', body:form});
+    referenceKey = data.reference_key;
+    $('reference-preview').src = data.preview_url;
+    $('reference-preview').classList.remove('hidden');
+    $('reference-status').textContent = 'Референс загружен. Подтвердите права на его обработку.';
+  } catch (err) { message(err.message, true); }
+  check();
+};
+$('generate').onclick = async () => {
+  check(); if ($('generate').disabled) return;
+  busy = true; check(); message('Генерация выполняется. Не закрывайте приложение…');
+  // Reuse request_id after an uncertain network result: the server's idempotency
+  // ledger will return the original job instead of launching a second paid call.
+  if (!pendingRequestId) pendingRequestId = crypto.randomUUID();
+  try {
+    const payload = {
+      request_id:pendingRequestId, provider:'reapi',
+      prompt:$('prompt').value.trim(), style:$('style').value, aspect:$('aspect').value,
+      mode:$('mode').value, reference_key:referenceKey, confirm_rights:$('rights').checked
+    };
+    const data = await api('/api/generate', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    if (data.status === 'completed' && safeHttps(data.image_url)) {
+      $('result-image').src = data.image_url;
+      $('download').href = data.image_url;
+      $('result-panel').classList.remove('hidden');
+      message('Изображение создано!');
+      $('result-panel').scrollIntoView({behavior:'smooth'});
+    } else {
+      message('Задание: ' + statusName(data.status) + '. Не создавайте повторную генерацию до проверки.');
+    }
+    await refresh();
+  } catch (err) {
+    message(err.message + ' Повторная попытка с этой формой использует тот же номер запроса.', true);
+    try { await refresh(); } catch { /* preserve original error */ }
+  } finally { busy = false; check(); }
+};
+$('new-image').onclick = () => {
+  $('result-panel').classList.add('hidden');
+  $('rights').checked = false;
+  pendingRequestId = '';
+  check();
+  window.scrollTo({top:0, behavior:'smooth'});
+};
+document.querySelectorAll('[data-legal]').forEach(link => link.addEventListener('click', event => {
+  event.preventDefault();
+  $('legal-frame').src = link.getAttribute('href');
+  $('legal-overlay').classList.remove('hidden');
 }));
-$('legal-close').onclick=()=>{$('legal-overlay').classList.add('hidden');$('legal-frame').removeAttribute('src')};
+$('legal-close').onclick = () => {
+  $('legal-overlay').classList.add('hidden');
+  $('legal-frame').removeAttribute('src');
+};
 login();
