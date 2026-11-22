@@ -109,8 +109,11 @@ def _image_url(task):
 
 def _download_reapi_image(url,task_id):
     parsed=urlparse(url)
-    # Never fetch arbitrary provider-supplied URLs (SSRF). Only the documented reAPI CDN.
-    if parsed.scheme!='https' or parsed.hostname!='cdn.reapi.ai' or parsed.username or parsed.password or parsed.port not in (None,443):
+    # Only allow confirmed image hosts, never arbitrary provider-supplied URLs (SSRF).
+    # reAPI Grok Imagine may return image URLs hosted at file.deepytb.com.
+    allowed_hosts = {'cdn.reapi.ai', 'file.deepytb.com'}
+    if (parsed.scheme != 'https' or parsed.hostname not in allowed_hosts
+            or parsed.username or parsed.password or parsed.port not in (None, 443)):
         raise ProviderError('Неизвестный адрес результата reAPI: требуется проверка',task_id=task_id)
     try:
         r=requests.get(url,timeout=(10,40),stream=True,allow_redirects=False)
