@@ -1,11 +1,12 @@
 'use strict';
-// IGK v12: financial history behaves like the Restorer's ledger.
+// IGK v13: unified generation, safe model selection, restorer-style payments and ledger.
 // The source of truth for money remains YDB; never infer a second debit on "payment".
 const $ = id => document.getElementById(id);
 const base = (window.APP_CONFIG?.API_BASE || '').replace(/\/$/, '');
 const credits = kopeks => (Number(kopeks || 0) / 1000).toLocaleString('ru-RU', {
   minimumFractionDigits: 2, maximumFractionDigits: 2
-}) + ' кредита';
+}) + ' кредитов';
+const shortCredits = kopeks => (Number(kopeks || 0) / 1000).toLocaleString('ru-RU', {maximumFractionDigits: 2}) + ' кредитов';
 const rubles = kopeks => (Number(kopeks || 0) / 100).toLocaleString('ru-RU', {
   style: 'currency', currency: 'RUB'
 });
@@ -19,6 +20,11 @@ const formatTime = date => {
 };
 const statusName = s => ({completed:'Готово', failed:'Ошибка', unknown:'Требуется проверка',
   reserved:'В обработке', pending:'В обработке', cancelled:'Отменено'}[s] || 'В обработке');
+const modelName = value => ({
+  'grok-imagine-image-2-0':'Grok Imagine 2.0',
+  'grok-imagine-image-2.0-official':'Grok Imagine 2.0 1K',
+  'nano-banana-2.1':'Nano Banana 2.1 2K'
+}[value] || (value ? String(value) : ''));
 const kindName = kind => ({text:'По тексту', reference:'По фотографии'}[kind] || 'Генерация');
 const safeHttps = value => {
   try { const url = new URL(value); return url.protocol === 'https:' ? url.href : ''; }
@@ -32,6 +38,7 @@ const el = (tag, className = '', content = '') => {
 };
 
 let token = '', active = false, referenceKey = '', busy = false, pendingRequestId = '';
+let modelPrices = {grok:1000}, allowedModels=['grok'];
 let currentHistory = {jobs:[], movements:[]};
 let currentWallet = {available:0, held:0};
 let paymentOrdersById = new Map();
@@ -54,7 +61,8 @@ function message(value, isError = false) {
 }
 function check() {
   $('generate').disabled = !active || !token || busy || !$('rights').checked ||
-    $('prompt').value.trim().length < 10 || ($('mode').value === 'reference' && !referenceKey);
+    $('prompt').value.trim().length < 10 || ($('reference-toggle').checked && !referenceKey) ||
+    !allowedModels.includes($('model').value);
 }
 async function login() {
   $('retry').classList.add('hidden');
@@ -84,9 +92,13 @@ async function refresh() {
   // With PROVIDER_SELECTOR_VISIBLE=0 the backend enforces PROVIDER_DEFAULT=reapi.
   active = profile.generation_enabled === true && (profile.available_providers || []).includes('reapi') &&
     (profile.provider_selector_visible === true || profile.provider_default === 'reapi');
-  $('provider-audit-panel').classList.toggle('hidden', !profile.admin);
+  $('provider-audit-panel').classList.toggle('hidden', profile.admin !== true);
+  allowedModels = Array.isArray(profile.available_models) && profile.available_models.length ? profile.available_models : ['grok'];
+  modelPrices = profile.model_prices || {grok:profile.price};
+  $('model').querySelectorAll('option').forEach(opt => opt.disabled = !allowedModels.includes(opt.value));
+  if (!allowedModels.includes($('model').value)) $('model').value = 'grok';
   $('balance').textContent = credits(currentWallet.available);
-  $('price').textContent = credits(profile.price);
+  updateModelPrice();
   if (!active) message('Генерация через reAPI не включена в настройках сервера.', true);
   check();
   const history = await api('/api/history');
@@ -130,10 +142,10 @@ function renderJobs() {
     const row = el('button', 'history-item history-job');
     row.type = 'button';
     const left = el('span', 'history-job-body');
-    left.append(el('strong', 'history-job-title', `${kindName(job.kind)} · Пропорции ${job.aspect || '—'}`));
+    left.append(el('strong', 'history-job-title', `${modelName(job.model) || kindName(job.kind)} · ${job.aspect || '—'}`));
     left.append(el('span', 'history-job-meta', `${formatTime(job.created_at)} · ${formatDate(job.created_at)} · ${statusName(job.status)} · ${credits(job.price)}`));
     left.append(el('span', 'history-job-prompt', String(job.prompt || '').slice(0, 150)));
-    row.append(left, el('span', 'history-job-action', job.status === 'completed' ? 'Открыть' : 'Статус'));
+    row.append(left);
     row.addEventListener('click', () => { void openHistoryJob(job); });
     container.append(row);
   }
@@ -147,85 +159,68 @@ function renderMovements() {
   const container = $('movements');
   container.replaceChildren();
   const byJob = new Map(currentHistory.jobs.map(j => [j.job_id, j]));
-  // Some historic jobs were removed while retaining the financial ledger.
-  // Recover the charged price from a matching reserve movement when possible.
   const reservedByReference = new Map();
   for (const m of currentHistory.movements) {
     if (m.kind === 'reserve' && m.reference) reservedByReference.set(m.reference, Math.abs(Number(m.amount || 0)));
   }
+  // YDB 'payment' has amount 0: funds were taken from available at 'reserve'.
+  // Reconstruct displayed available-after in reverse chronological order.
   let availableAfter = Number(currentWallet.available || 0);
   const rows = currentHistory.movements.map(m => {
     const after = availableAfter;
-    // Amounts in this ledger are signed changes to AVAILABLE: reserve<0,
-    // welcome/topup/release>0. Payment is amount=0 because held funds are captured.
-    if (['welcome','topup','reserve','release'].includes(m.kind)) availableAfter -= Number(m.amount || 0);
-    return {movement:m, balanceAfter:after};
+    if (['welcome', 'topup', 'reserve', 'release'].includes(m.kind)) {
+      availableAfter -= Number(m.amount || 0);
+    }
+    return {m, after};
   });
-
-  for (const {movement:m, balanceAfter:after} of rows.slice(0, visibleMovements)) {
+  for (const {m, after} of rows.slice(0, visibleMovements)) {
     const job = byJob.get(m.reference);
-    const jobLabel = job ? `${kindName(job.kind)} · ${job.aspect || '—'}` : '';
-    const jobPrice = job && Number.isFinite(Number(job.price)) ? Number(job.price) : reservedByReference.get(m.reference);
-    let title, amountText, details = [];
+    const price = job && Number.isFinite(Number(job.price)) ? Number(job.price) : reservedByReference.get(m.reference);
+    const label = job ? (modelName(job.model) || `${kindName(job.kind)} ${job.aspect || ''}`) : '';
+    let operation = '';
     switch (m.kind) {
       case 'payment':
-        title = 'Оплата из резерва';
-        amountText = Number.isFinite(jobPrice) ? credits(jobPrice) : 'Подтверждена';
-        details.push('подтверждена');
+        operation = 'Оплата из резерва' + (Number.isFinite(price) ? ` - ${shortCredits(price)}` : '');
         break;
       case 'reserve':
-        title = 'Резервирование средств';
-        amountText = '−' + credits(Math.abs(Number(m.amount || 0)));
+        operation = `Резервирование средств - ${shortCredits(Math.abs(Number(m.amount || 0)))}`;
         break;
       case 'release':
-        title = 'Возврат резерва';
-        amountText = '+' + credits(Math.abs(Number(m.amount || 0)));
+        operation = `Возврат резерва + ${shortCredits(Math.abs(Number(m.amount || 0)))}`;
         break;
       case 'welcome':
-        title = Number(m.amount) === 3000 ? 'Приветственные 3 кредита' : 'Приветственные кредиты';
-        amountText = '+' + credits(Math.abs(Number(m.amount || 0)));
+        operation = `Приветственный бонус + ${shortCredits(Math.abs(Number(m.amount || 0)))}`;
         break;
       case 'topup':
-        title = 'Пополнение баланса';
-        amountText = '+' + credits(Math.abs(Number(m.amount || 0)));
+        operation = `Пополнение баланса + ${shortCredits(Math.abs(Number(m.amount || 0)))}`;
         break;
       default:
-        title = String(m.note || m.kind || 'Операция');
-        amountText = Number(m.amount) === 0 ? 'Подтверждена' :
-          (Number(m.amount) > 0 ? '+' : '−') + credits(Math.abs(Number(m.amount || 0)));
+        operation = String(m.note || m.kind || 'Операция') +
+          (Number(m.amount || 0) ? ` ${Number(m.amount) > 0 ? '+' : '-'} ${shortCredits(Math.abs(Number(m.amount)))}` : '');
     }
+    const parts = [`${formatDate(m.created_at)} ${formatTime(m.created_at)}`];
+    if (label) parts.push(label);
+    parts.push(operation, `Баланс — ${shortCredits(after)}`);
     const row = el('div', 'history-item movement-item');
-    const head = el('div', 'movement-head');
-    head.append(el('strong', 'movement-title', title));
-    head.append(el('span', 'movement-amount', amountText));
-    row.append(head);
-    details.unshift(`${formatDate(m.created_at)} ${formatTime(m.created_at)}`);
-    if (jobLabel) details.push(jobLabel);
-    // Show the actual price for this payment, but never add a second debit.
-    if (m.kind === 'payment' && Number.isFinite(jobPrice)) details.push(rubles(jobPrice));
-    if (['reserve','release','topup','welcome'].includes(m.kind)) details.push(rubles(Math.abs(Number(m.amount || 0))));
-    details.push(`Баланс — ${credits(after)}`);
-    row.append(el('div', 'movement-details', details.join(' · ')));
+    row.append(el('span', 'movement-single-line', parts.join(' · ')));
     if (m.kind === 'topup') {
-      const receipt = paymentOrdersById.get(m.reference)?.receipt;
-      const receiptUrl = safeHttps(receipt);
-      if (receiptUrl) {
+      const receipt = safeHttps(paymentOrdersById.get(m.reference)?.receipt);
+      if (receipt) {
         const link = el('a', 'receipt-link', 'Открыть чек НПД');
-        link.href = receiptUrl;
+        link.href = receipt;
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
         row.append(link);
-      } else if (receipt) {
-        row.append(el('span', 'receipt-label', `Чек НПД: ${String(receipt).slice(0, 150)}`));
       }
     }
     container.append(row);
   }
   if (!currentHistory.movements.length) container.textContent = 'Операций пока нет.';
-  const remainder = Math.max(0, currentHistory.movements.length - visibleMovements);
-  $('movements-more').classList.toggle('hidden', remainder === 0);
-  $('movements-more').textContent = `Показать ещё операции (${remainder})`;
+  const remaining = Math.max(0, currentHistory.movements.length - visibleMovements);
+  $('movements-more').classList.toggle('hidden', remaining === 0);
+  $('movements-more').textContent = `Показать ещё операции (${remaining})`;
 }
+
 function renderHistory() { renderJobs(); renderMovements(); }
 
 async function loadProviderAudit() {
@@ -257,14 +252,22 @@ $('prompt').addEventListener('input', () => {
   check();
 });
 $('rights').onchange = check;
-$('mode').onchange = () => {
+$('reference-toggle').onchange = () => {
   referenceKey = '';
-  $('rights').checked = false;
+  // Keep request_id after uncertain network outcomes: avoids a second paid task.
   $('reference').value = '';
+  $('reference-preview').removeAttribute('src');
   $('reference-preview').classList.add('hidden');
-  $('reference-panel').classList.toggle('hidden', $('mode').value !== 'reference');
+  $('reference-status').textContent = 'Файл будет загружен в закрытое хранилище.';
+  $('rights').checked = false;
+  $('reference-panel').classList.toggle('hidden', !$('reference-toggle').checked);
   check();
 };
+$('model').onchange = () => { updateModelPrice(); check(); };
+function updateModelPrice() {
+  const cost = modelPrices[$('model').value];
+  $('price').textContent = Number.isFinite(Number(cost)) ? credits(cost) : '— кредитов';
+}
 $('reference').onchange = async () => {
   referenceKey = '';
   $('rights').checked = false; // A new uploaded photo requires new consent.
@@ -290,9 +293,9 @@ $('generate').onclick = async () => {
   if (!pendingRequestId) pendingRequestId = crypto.randomUUID();
   try {
     const payload = {
-      request_id:pendingRequestId, provider:'reapi',
+      request_id:pendingRequestId, provider:'reapi', model:$('model').value,
       prompt:$('prompt').value.trim(), style:$('style').value, aspect:$('aspect').value,
-      mode:$('mode').value, reference_key:referenceKey, confirm_rights:$('rights').checked
+      mode:$('reference-toggle').checked ? 'reference' : 'text', reference_key:$('reference-toggle').checked ? referenceKey : '', confirm_rights:$('rights').checked
     };
     const data = await api('/api/generate', {method:'POST',
       headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});

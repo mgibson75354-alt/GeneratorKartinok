@@ -16,6 +16,7 @@ PROXY_ENDPOINT='https://api.proxyapi.ru/v1/images/'
 REAPI_BASE='https://reapi.ai/api/v1'
 REAPI_STANDARD='grok-imagine-image-2-0'
 REAPI_OFFICIAL='grok-imagine-image-2.0-official'
+REAPI_NANO_21='nano-banana-2.1'
 STANDARD_RATIOS={'1:1','2:3','3:2','9:16','16:9'}
 
 class ProviderError(RuntimeError):
@@ -127,20 +128,33 @@ def _download_reapi_image(url,task_id):
         raise ProviderError('Результат reAPI не получен: нужен контроль задания',task_id=task_id) from exc
 
 
-def _reapi(prompt,mode,reference_url,aspect):
+def reapi_model(choice,mode,aspect):
+    if choice == 'nano_banana_21':
+        return REAPI_NANO_21
+    if choice != 'grok':
+        raise ValueError('Недопустимая модель reAPI')
+    return REAPI_STANDARD if mode == 'text' and aspect in STANDARD_RATIOS else REAPI_OFFICIAL
+
+
+def _reapi(prompt,mode,reference_url,aspect,model_choice='grok'):
     key=os.getenv('REAPI_API_KEY','')
     if not key:raise ProviderError('REAPI_API_KEY не настроен',definite=True)
     if mode=='reference' and not reference_url:raise ProviderError('Не загружен референс',definite=True)
     headers={'Authorization':f'Bearer {key}','Content-Type':'application/json'}
-    standard=mode=='text' and aspect in STANDARD_RATIOS
-    model=REAPI_STANDARD if standard else REAPI_OFFICIAL
-    body={'model':model,'prompt':prompt,'n':1}
-    # reAPI supports 3:4 but not 4:5: select the nearest supported portrait ratio.
-    requested_aspect='3:4' if aspect=='4:5' else aspect
-    if standard:body['size']=requested_aspect
-    else:
-        body.update({'aspect_ratio':requested_aspect,'resolution':'1k','quality':'medium'})
+    model = reapi_model(model_choice,mode,aspect)
+    if model_choice == 'nano_banana_21':
+        # Nano Banana 2.1 accepts 4:5 and does not accept 'n'.
+        body={'model':model,'prompt':prompt,'aspect_ratio':aspect,'resolution':'2k'}
         if mode=='reference':body['image_urls']=[reference_url]
+    else:
+        standard = model == REAPI_STANDARD
+        body={'model':model,'prompt':prompt,'n':1}
+        # Grok's standard/official channels do not accept 4:5; map to 3:4.
+        requested_aspect='3:4' if aspect=='4:5' else aspect
+        if standard:body['size']=requested_aspect
+        else:
+            body.update({'aspect_ratio':requested_aspect,'resolution':'1k','quality':'medium'})
+            if mode=='reference':body['image_urls']=[reference_url]
     start=time.monotonic()
     try:r=requests.post(REAPI_BASE+'/images/generations',headers=headers,json=body,timeout=(10,35))
     except requests.RequestException as exc:raise ProviderError('Неизвестно, принял ли reAPI запрос: нужна сверка.') from exc
@@ -167,7 +181,7 @@ def _reapi(prompt,mode,reference_url,aspect):
     raise ProviderError('reAPI продолжает обработку: резерв сохранён. Требуется проверка',task_id=task_id)
 
 
-def generate(prompt,mode='text',reference=None,*,selected='proxyapi',aspect='1:1',reference_url=''):
+def generate(prompt,mode='text',reference=None,*,selected='proxyapi',aspect='1:1',reference_url='',model_choice='grok'):
     if selected=='proxyapi':return _proxy(prompt,mode,reference,aspect)
-    if selected=='reapi':return _reapi(prompt,mode,reference_url,aspect)
+    if selected=='reapi':return _reapi(prompt,mode,reference_url,aspect,model_choice)
     raise ProviderError('Неизвестный провайдер',definite=True)

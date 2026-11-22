@@ -41,7 +41,8 @@ class SignIn(BaseModel):
 
 class Generate(BaseModel):
     request_id: str=Field(min_length=8,max_length=120)
-    provider: Literal['reapi','proxyapi']='proxyapi'
+    provider: Literal['reapi','proxyapi']='reapi'  # Backward compatible; server always uses reAPI.
+    model: Literal['grok','nano_banana_21']='grok'
     prompt: str=Field(min_length=10,max_length=1800)
     style: Literal['realistic','advertising','illustration','cinematic','art']='realistic'
     aspect: Literal['1:1','4:5','3:2','2:3','16:9','9:16']='4:5'
@@ -61,6 +62,14 @@ class Resolve(BaseModel):
     success: bool
     output_key: str=''
     note: str=''
+
+def model_prices():
+    # User-facing prices are in kopeks; server is the authority.
+    grok = config.price()
+    other = int(os.getenv('IMAGE_PRICE_NANO_BANANA_21_KOPEKS', str(grok)))
+    if not 1 <= other <= 500000:
+        raise ValueError('IMAGE_PRICE_NANO_BANANA_21_KOPEKS должен быть в пределах 1..500000')
+    return {'grok': grok, 'nano_banana_21': other}
 
 @app.get('/api/health')
 def health():return {'status':'ok','project':'image-generator','database':'ydb'}
@@ -118,13 +127,19 @@ def profile(uid:str=Depends(user)):
             'payment_qr_url':os.getenv('PAYMENT_QR_URL',''),
             'payment_sbp_link':os.getenv('PAYMENT_SBP_LINK',''),
             'provider_selector_visible':config.flag('PROVIDER_SELECTOR_VISIBLE'),
-            'provider_default':config.selected_provider(),
-            'available_providers':config.available_providers()}
+            'provider_default':'reapi',
+            'available_providers':['reapi'] if os.getenv('REAPI_API_KEY') else [],
+            'available_models':['grok','nano_banana_21'] if os.getenv('REAPI_API_KEY') else [],
+            'model_prices':model_prices()}
 
 @app.get('/api/history')
 def history(uid:str=Depends(user)):
     result=db().history(uid)
+    # Provider audit already records the actual model, no YDB migration needed.
+    records=db().query('SELECT job_id, model FROM igk_provider_audit WHERE user_id=$u',u=uid)
+    models={row['job_id']:row.get('model','') for row in records}
     for job in result['jobs']:
+        job['model']=models.get(job['job_id'],'')
         job['image_url']=images().url(job['output_key']) if job.get('output_key') and job.get('status')=='completed' else None
     return result
 
@@ -153,9 +168,11 @@ def composed_prompt(p):
 def generate(p:Generate,uid:str=Depends(user)):
     if not config.flag('GENERATION_ENABLED'):raise HTTPException(503,'Генерация пока выключена')
     if not p.confirm_rights:raise HTTPException(400,'Подтвердите права на материалы')
-    try:selected=config.selected_provider(p.provider)
-    except ValueError as exc:raise HTTPException(400,str(exc)) from exc
-    if selected not in config.available_providers():raise HTTPException(503,'Ключ выбранного провайдера пока не настроен')
+    # Provider is fixed on the server. The browser cannot force ProxyAPI.
+    selected='reapi'
+    if not os.getenv('REAPI_API_KEY'):
+        raise HTTPException(503,'REAPI_API_KEY не настроен')
+    price=model_prices()[p.model]
     reference_key=''
     if p.mode=='reference':
         prefix=images().key(uid,'reference','','')
@@ -163,7 +180,7 @@ def generate(p:Generate,uid:str=Depends(user)):
         reference_key=p.reference_key
     prompt=composed_prompt(p)
     try:
-        job,created=db().reserve(uid,p.request_id,p.mode,prompt,p.aspect,config.price(),reference_key)
+        job,created=db().reserve(uid,p.request_id,p.mode,prompt,p.aspect,price,reference_key)
     except Conflict as exc:raise HTTPException(409,str(exc)) from exc
     if not created:
         return {'job_id':job['job_id'],'status':job['status'],'reused':True,
@@ -171,14 +188,14 @@ def generate(p:Generate,uid:str=Depends(user)):
     jid=job['job_id']
     try:
         # Persist provider choice BEFORE contacting it, to support manual reconciliation.
-        db().audit_provider(uid,jid,selected,'reserved')
+        db().audit_provider(uid,jid,selected,'reserved',model=provider.reapi_model(p.model,p.mode,p.aspect))
     except Exception:
         db().settle(uid,jid,False,reason='Не удалось сохранить выбор провайдера до генерации')
         raise HTTPException(503,'Ошибка сохранения задания провайдера. Резерв возвращён.')
     try:
         source=images().get(reference_key) if reference_key else None
         url=images().url(reference_key) if reference_key and selected=='reapi' else ''
-        result=provider.generate(prompt,p.mode,source,selected=selected,aspect=p.aspect,reference_url=url)
+        result=provider.generate(prompt,p.mode,source,selected=selected,aspect=p.aspect,reference_url=url,model_choice=p.model)
         raw=result.image
         ctype,ext=image_type(raw)
         output=images().key(uid,'results',jid,ext)
@@ -188,7 +205,7 @@ def generate(p:Generate,uid:str=Depends(user)):
         except Exception:pass  # settlement already committed; do not mark completed job as failed
         return {'job_id':jid,'status':'completed','reused':False,'image_url':images().url(output),'provider':selected}
     except provider.ProviderError as exc:
-        try:db().audit_provider(uid,jid,selected,'failed' if exc.definite else 'unknown',exc.task_id,note=str(exc))
+        try:db().audit_provider(uid,jid,selected,'failed' if exc.definite else 'unknown',exc.task_id,model=provider.reapi_model(p.model,p.mode,p.aspect),note=str(exc))
         except Exception:pass
         if exc.definite:
             db().settle(uid,jid,False,reason=str(exc))
@@ -196,7 +213,7 @@ def generate(p:Generate,uid:str=Depends(user)):
             db().mark_unknown(uid,jid,(str(exc)+' '+exc.task_id).strip())
         raise HTTPException(502,str(exc)) from exc
     except Exception:
-        try:db().audit_provider(uid,jid,selected,'unknown',note='Ошибка выполнения или хранения результата')
+        try:db().audit_provider(uid,jid,selected,'unknown',model=provider.reapi_model(p.model,p.mode,p.aspect),note='Ошибка выполнения или хранения результата')
         except Exception:pass
         db().mark_unknown(uid,jid,'Ошибка выполнения или хранения результата. Нужна проверка администратора.')
         raise HTTPException(502,'Результат требует проверки. Не отправляйте задание повторно.')

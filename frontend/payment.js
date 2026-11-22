@@ -1,80 +1,151 @@
 'use strict';
-const $=id=>document.getElementById(id);
-const base=(window.APP_CONFIG?.API_BASE||'').replace(/\/$/,'');
-const escaped=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&quot;'}[c]));
-const credits=k=>(Number(k||0)/1000).toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2})+' кредитов';
-let token='',profile={},orderId='',selected='',busy=false;
-async function api(path,opts={}){
- const res=await fetch(base+path,{...opts,headers:{'X-App-Authorization':`Bearer ${token}`,...(opts.headers||{})}});
- let data;try{data=await res.json()}catch{throw Error('HTTP '+res.status)}
- if(!res.ok)throw Error(data.detail||'HTTP '+res.status);return data;
+// IGK v13 — server-side balance & manual VTB-confirmed topups, styled after the Restorer.
+const $ = id => document.getElementById(id);
+const base = (window.APP_CONFIG?.API_BASE || '').replace(/\/$/, '');
+const credits = k => (Number(k||0)/1000).toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2})+' кредитов';
+const rubles = k => (Number(k||0)/100).toLocaleString('ru-RU',{style:'currency',currency:'RUB'});
+const dt = x => x ? new Date(x).toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'}) : 'Дата неизвестна';
+const safeHttps = u => {try {const a=new URL(u);return a.protocol==='https:' ? a.href : '';}catch{return '';}};
+const statusName = x => ({pending:'Ожидает оплаты',review:'На проверке',paid:'Кредиты начислены',cancelled:'Отменена'}[x]||x||'—');
+let token='',currentOrder=null,paymentQr='',paymentLink='',orders=[],adminSelected=null,adminEnabled=false;
+async function api(path,{method='GET',body=null}={}) {
+  const isForm=body instanceof FormData;
+  const response=await fetch(base+path,{method,headers:{...(token?{'X-App-Authorization':'Bearer '+token}:{}),...(!isForm&&body?{'Content-Type':'application/json'}:{})},body:isForm?body:body?JSON.stringify(body):undefined});
+  let result={};try {result=await response.json();}catch{}
+  if(!response.ok) throw Error(typeof result.detail==='string'?result.detail:'Ошибка сервера HTTP '+response.status);
+  return result;
 }
-const status=s=>$('payment-message').textContent=s;
-async function login(){
- try{
-  const raw=window.WebApp?.initData;if(!raw)throw Error('Откройте приложение через MAX');
-  const r=await fetch(base+'/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:raw})});
-  const data=await r.json();if(!r.ok)throw Error(data.detail||'Авторизация не удалась');token=data.token;
-  $('workspace').classList.remove('hidden');$('gate').classList.add('hidden');await refresh();
- }catch(e){$('gate-title').textContent='Доступ не подтверждён';$('gate-message').textContent=e.message;$('retry').classList.remove('hidden')}
+function info(id,text,isError=false) {const n=$(id);n.textContent=text;n.classList.toggle('error',isError);}
+async function login() {
+  $('retry').classList.add('hidden');
+  try {
+    const init=window.WebApp?.initData;
+    if(!init) throw Error('Откройте пополнение из приложения внутри MAX.');
+    const response=await fetch(base+'/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:init})});
+    const data=await response.json();if(!response.ok) throw Error(data.detail||'Ошибка авторизации');
+    token=data.token;
+    const profile=await api('/api/profile');
+    if(!profile.payments_enabled) throw Error('Пополнение баланса временно выключено.');
+    adminEnabled=profile.admin===true;
+    $('balance').textContent=credits(profile.wallet.available);
+    paymentQr=safeHttps(profile.payment_qr_url);
+    paymentLink=safeHttps(profile.payment_sbp_link);
+    $('pay-admin').classList.toggle('hidden',!adminEnabled);
+    $('gate').classList.add('hidden');$('workspace').classList.remove('hidden');
+    await loadOrders();
+    if(adminEnabled) await loadAdminOrders();
+  } catch(err){$('gate-title').textContent='Доступ не подтверждён';$('gate-message').textContent=err.message;$('retry').classList.remove('hidden');}
 }
-async function refresh(){
- profile=await api('/api/profile');$('balance').textContent=credits(profile.wallet.available);
- $('create-order').disabled=!profile.payments_enabled;
- if(!profile.payments_enabled)status('Пополнение пока отключено администратором.');
- const orders=(await api('/api/payments/orders')).orders;
- $('orders').innerHTML=orders.length?orders.map(o=>`<div class="history-item"><div><strong>${escaped(o.order_id.slice(0,12))} · ${(o.amount/100).toFixed(2)} ₽</strong><div><span>${escaped(o.status)} · ${escaped(o.created_at)}</span></div>${o.receipt?`<span>Чек НПД: ${escaped(o.receipt)}</span>`:''}</div></div>`).join(''):'Заявок пока нет.';
- $('admin-box').classList.toggle('hidden',!profile.admin);
- if(profile.admin){$('admin-jobs-box').classList.remove('hidden');await loadAdmin();await loadJobs();}
+async function refreshBalance() {
+  const profile=await api('/api/profile');
+  $('balance').textContent=credits(profile.wallet.available);
 }
+async function loadOrders(){
+  const payload=await api('/api/payments/orders');
+  orders=Array.isArray(payload.orders)?payload.orders:[];
+  const list=$('pay-my-orders');list.replaceChildren();
+  for(const o of orders){
+    const button=document.createElement('div');button.className='history-item payment-order-card';
+    button.setAttribute('role','button');button.setAttribute('tabindex','0');
+    button.classList.toggle('selected',o.order_id===currentOrder?.order_id);
+    button.textContent=`${dt(o.created_at)} · ${rubles(o.amount)} · ${statusName(o.status)}`;
+    const receipt=safeHttps(o.receipt);
+    if(receipt){const a=document.createElement('a');a.href=receipt;a.target='_blank';a.rel='noopener noreferrer';a.textContent='Открыть чек НПД';a.className='receipt-link';a.onclick=e=>e.stopPropagation();button.append(a);}
+    button.onclick=()=>showOrder(o);
+    button.onkeydown=e=>{if(e.target===button&&(e.key==='Enter'||e.key===' ')){e.preventDefault();showOrder(o);}};
+    list.append(button);
+  }
+  if(!orders.length)list.textContent='Заявок пока нет.';
+}
+function showOrder(o){
+  currentOrder=o;
+  $('pay-order').classList.remove('hidden');
+  $('pay-order-summary').textContent=`Заявка ${o.order_id.slice(0,12)} · ${rubles(o.amount)} · ${statusName(o.status)}`;
+  const actionable=['pending','review'].includes(o.status);
+  $('pay-proof').classList.toggle('hidden',!actionable);
+  $('pay-qr-button').classList.toggle('hidden',!actionable||(!paymentQr&&!paymentLink));
+  $('pay-start').classList.toggle('hidden',actionable);
+  $('pay-proof-file').value='';
+  info('pay-message','');
+  $('pay-my-orders').querySelectorAll('.payment-order-card').forEach(b=>b.classList.toggle('selected',b.textContent.startsWith(dt(o.created_at))));
+}
+$('pay-amount').onchange=()=>{currentOrder=null;$('pay-order').classList.add('hidden');$('pay-start').classList.remove('hidden');};
+$('pay-start').onclick=async()=>{
+  const b=$('pay-start');b.disabled=true;info('pay-message','Создаём заявку…');
+  try{
+    const o=await api('/api/payments/orders',{method:'POST',body:{amount:Number($('pay-amount').value)}});
+    currentOrder=o;await loadOrders();showOrder(o);info('pay-message','Заявка создана. Оплатите по СБП, затем приложите банковский чек.');
+  }catch(err){info('pay-message',err.message,true);}finally{b.disabled=false;}
+};
+$('pay-submit').onclick=async()=>{
+  if(!currentOrder)return;
+  const file=$('pay-proof-file').files?.[0];
+  if(!file || !['image/jpeg','image/png','application/pdf'].includes(file.type) || file.size<1 || file.size>8*1024*1024){
+    info('pay-message','Выберите JPG, PNG или PDF размером до 8 МБ.',true);return;
+  }
+  const b=$('pay-submit');b.disabled=true;
+  try{
+    const form=new FormData();form.append('file',file);
+    await api(`/api/payments/orders/${encodeURIComponent(currentOrder.order_id)}/proof`,{method:'POST',body:form});
+    currentOrder=null;$('pay-order').classList.add('hidden');$('pay-start').classList.remove('hidden');
+    info('pay-message','Подтверждение отправлено на проверку по выписке ВТБ.');await loadOrders();await refreshBalance();
+  }catch(err){info('pay-message',err.message,true);}finally{b.disabled=false;}
+};
+$('pay-qr-button').onclick=()=>{
+  if(!currentOrder || (!paymentQr&&!paymentLink))return;
+  $('sbp-modal-sum').textContent=rubles(currentOrder.amount);
+  $('sbp-modal-credits').textContent=credits(currentOrder.amount);
+  $('sbp-modal-order-id').textContent='Заявка: '+currentOrder.order_id.slice(0,12);
+  $('pay-qr').classList.toggle('hidden',!paymentQr);
+  if(paymentQr)$('pay-qr').src=paymentQr;else $('pay-qr').removeAttribute('src');
+  $('pay-link').classList.toggle('hidden',!paymentLink);if(paymentLink)$('pay-link').href=paymentLink;
+  $('pay-qr-error').classList.add('hidden');
+  $('pay-qr-modal').classList.remove('hidden');$('pay-qr-back').focus();
+};
+$('pay-qr').onerror=()=>{$('pay-qr').classList.add('hidden');$('pay-qr-error').classList.remove('hidden');};
+$('pay-qr').onload=()=>{$('pay-qr').classList.remove('hidden');$('pay-qr-error').classList.add('hidden');};
+function closeQr(){$('pay-qr-modal').classList.add('hidden');$('pay-qr-button').focus();}
+$('pay-qr-back').onclick=closeQr;
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('pay-qr-modal').classList.contains('hidden'))closeQr();});
+async function loadAdminOrders(){
+  if(!adminEnabled)return;
+  const payload=await api('/api/admin/orders');
+  const list=$('admin-orders');list.replaceChildren();
+  for(const o of payload.orders||[]){
+    const b=document.createElement('button');b.className='history-item payment-order-card';b.type='button';
+    b.textContent=`${dt(o.created_at)} · MAX ID ${o.user_id} · ${rubles(o.amount)} · ${statusName(o.status)}`;
+    b.onclick=()=>showAdminOrder(o);list.append(b);
+  }
+  if(!(payload.orders||[]).length)list.textContent='Заявок пока нет.';
+}
+function showAdminOrder(o){
+  adminSelected=o;$('admin-detail').classList.remove('hidden');
+  $('admin-order-title').textContent='Заявка '+o.order_id.slice(0,12);
+  $('admin-order-description').textContent=`MAX ID ${o.user_id} · ${rubles(o.amount)} · ${statusName(o.status)}`;
+  $('admin-bank-amount').value=(o.amount/100).toFixed(2);
+  $('admin-bank-reference').value='';$('admin-receipt').value='';
+  const proof=safeHttps(o.proof_url);$('admin-proof-link').classList.toggle('hidden',!proof);
+  if(proof)$('admin-proof-link').href=proof; else $('admin-proof-link').removeAttribute('href');
+  $('admin-approve').disabled=o.status!=='review';info('admin-message','');
+}
+$('admin-reload').onclick=async()=>{try{await loadAdminOrders();}catch(err){info('admin-message',err.message,true);}};
+$('admin-approve').onclick=async()=>{
+  if(!adminSelected || adminSelected.status!=='review')return;
+  const reference=$('admin-bank-reference').value.trim();
+  const amount=Math.round(Number($('admin-bank-amount').value)*100);
+  const receipt=$('admin-receipt').value.trim();
+  if(reference.length<8 || !/\d/.test(reference)){info('admin-message','Укажите уникальные банковские реквизиты, включая номер или дату и время.',true);return;}
+  if(!receipt){info('admin-message','Оформите чек НПД и укажите номер или ссылку.',true);return;}
+  if(amount!==Number(adminSelected.amount)){info('admin-message','Сумма по выписке должна соответствовать заявке.',true);return;}
+  if(!window.confirm('Фактическое поступление денег в ВТБ проверено, чек НПД оформлен. Начислить кредиты?'))return;
+  const btn=$('admin-approve');btn.disabled=true;
+  try{
+    const result=await api(`/api/admin/orders/${encodeURIComponent(adminSelected.order_id)}/approve`,{method:'POST',body:{bank_reference:reference,amount,receipt}});
+    info('admin-message',result.credited?'Кредиты начислены.':'Заявка уже была подтверждена.');
+    await loadAdminOrders();await loadOrders();await refreshBalance();
+  }catch(err){info('admin-message',err.message,true);}finally{btn.disabled=false;}
+};
 $('retry').onclick=login;
-$('create-order').onclick=async()=>{
- if(busy)return;busy=true;$('create-order').disabled=true;
- try{
- const o=await api('/api/payments/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:Number($('amount').value)})});
- orderId=o.order_id;$('active-order').classList.remove('hidden');$('order-summary').textContent=`Заявка №${o.order_id.slice(0,12)} · ${(o.amount/100).toFixed(2)} ₽ · Ожидает оплаты`;
- status('Заявка создана. Оплатите переводом и прикрепите банковский чек.');await refresh();
- }catch(e){status(e.message)}finally{busy=false;$('create-order').disabled=!profile.payments_enabled}
-};
-$('pay-button').onclick=()=>{
- $('qr-modal').classList.remove('hidden');$('qr-caption').textContent=`Заявка ${orderId.slice(0,12)}. Переведите точную сумму. Сохраните чек из ВТБ.`;
- if(profile.payment_qr_url){$('qr-image').src=profile.payment_qr_url;$('qr-image').classList.remove('hidden')}else{$('qr-image').removeAttribute('src')}
- $('sbp-link').classList.toggle('hidden',!profile.payment_sbp_link);if(profile.payment_sbp_link)$('sbp-link').href=profile.payment_sbp_link;
-};
-$('qr-close').onclick=()=>$('qr-modal').classList.add('hidden');
-$('submit-proof').onclick=async()=>{
- if(!orderId){status('Сначала создайте заявку');return}
- const file=$('proof').files[0];if(!file){status('Прикрепите чек');return}if(file.size>8*1024*1024){status('Файл больше 8 МБ');return}
- $('submit-proof').disabled=true;const form=new FormData();form.append('file',file);
- try{await api('/api/payments/orders/'+encodeURIComponent(orderId)+'/proof',{method:'POST',body:form});status('Чек получен. Ожидайте проверки поступления администратором ВТБ.');await refresh()}
- catch(e){status(e.message)}finally{$('submit-proof').disabled=false}
-};
-async function loadAdmin(){
- const data=await api('/api/admin/orders');$('admin-orders').innerHTML=data.orders.map(o=>`<button type="button" class="history-item button outline wide" data-order="${escaped(o.order_id)}"><span>${escaped(o.order_id.slice(0,12))} · ${(o.amount/100).toFixed(2)} ₽ · ${escaped(o.status)} · MAX ${escaped(o.user_id)}</span></button>`).join('');
- $('admin-orders').querySelectorAll('button').forEach((button,i)=>button.onclick=()=>choose(data.orders[i]));
-}
-function choose(o){selected=o.order_id;$('admin-detail').classList.remove('hidden');$('admin-selected').textContent=`Заявка ${o.order_id.slice(0,12)} · MAX ${o.user_id}`;$('bank-amount').value=(o.amount/100).toFixed(2);$('admin-proof').href=o.proof_url||'#';$('admin-proof').classList.toggle('hidden',!o.proof_url);$('admin-message').textContent=o.status==='review'?'Сверьте перевод в банке перед подтверждением.':'Нельзя начислять до получения подтверждения клиента.';}
-$('admin-refresh').onclick=loadAdmin;
-async function loadJobs(){
- const data=await api('/api/admin/jobs');
- $('admin-jobs').innerHTML=data.jobs.length?data.jobs.map(j=>`<div class="history-item"><div><strong>${escaped(j.job_id.slice(0,12))} · ${escaped(j.status)}</strong><div><span>MAX ${escaped(j.user_id)} · ${credits(j.price)}</span></div><p class="fine">${escaped(j.error||j.prompt.slice(0,110))}</p></div><button class="button outline" type="button" data-job="${escaped(j.job_id)}">Вернуть резерв</button></div>`).join(''):'Нет незавершённых заданий.';
- $('admin-jobs').querySelectorAll('button').forEach((btn,i)=>btn.onclick=async()=>{
- const j=data.jobs[i];if(!confirm(`Подтверждаете, что в ProxyAPI не было выполненной платной генерации №${j.job_id.slice(0,12)}? Вернуть резерв?`))return;
- btn.disabled=true;
- try{await api('/api/admin/jobs/'+encodeURIComponent(j.user_id)+'/'+encodeURIComponent(j.job_id)+'/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({success:false,note:'Ручная сверка с провайдером: генерация не выполнена'})});await loadJobs();await refresh();}
- catch(e){alert(e.message)}finally{btn.disabled=false}
- });
-}
-$('jobs-refresh').onclick=loadJobs;
-$('approve').onclick=async()=>{
- if(!selected)return;$('approve').disabled=true;
- try{const p={bank_reference:$('bank-reference').value,amount:Math.round(Number($('bank-amount').value)*100),receipt:$('npd-receipt').value};
- const result=await api('/api/admin/orders/'+encodeURIComponent(selected)+'/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
- $('admin-message').textContent=result.credited?'Кредиты начислены однократно.':'Заявка уже подтверждена.';await refresh();}
- catch(e){$('admin-message').textContent=e.message}finally{$('approve').disabled=false}
-};
-document.querySelectorAll('[data-legal]').forEach(a=>a.addEventListener('click',e=>{
- e.preventDefault();$('legal-frame').src=a.getAttribute('href');$('legal-overlay').classList.remove('hidden');
-}));
-$('legal-close').onclick=()=>{$('legal-overlay').classList.add('hidden');$('legal-frame').removeAttribute('src')};
+document.querySelectorAll('[data-legal]').forEach(link=>link.onclick=e=>{e.preventDefault();$('legal-frame').src=link.getAttribute('href');$('legal-overlay').classList.remove('hidden');});
+$('legal-close').onclick=()=>{$('legal-overlay').classList.add('hidden');$('legal-frame').removeAttribute('src');};
 login();
