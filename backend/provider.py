@@ -18,6 +18,8 @@ REAPI_STANDARD='grok-imagine-image-2-0'
 REAPI_OFFICIAL='grok-imagine-image-2.0-official'
 REAPI_NANO_21='nano-banana-2.1'
 REAPI_GPT_IMAGE_26='gpt-image-2.6-flare'
+REAPI_GPT_IMAGE_26_SUNBURST='gpt-image-2.6-sunburst'
+REAPI_NANO_PRO='gemini-3-pro-image-preview'
 GPT_IMAGE_26_SIZES={'1:1':'1024x1024','4:5':'1024x1280','3:2':'1536x1024',
                     '2:3':'1024x1536','16:9':'1536x864','9:16':'864x1536'}
 STANDARD_RATIOS={'1:1','2:3','3:2','9:16','16:9'}
@@ -134,10 +136,17 @@ def _download_reapi_image(url,task_id):
 def reapi_model(choice,mode,aspect):
     if choice == 'nano_banana_21':
         return REAPI_NANO_21
-    if choice == 'gpt_image_26':
+    if choice == 'nano_banana_pro':
+        return REAPI_NANO_PRO
+    if choice in ('gpt_image_26', 'gpt_image_26_flare'):
         return REAPI_GPT_IMAGE_26
+    if choice == 'gpt_image_26_sunburst':
+        return REAPI_GPT_IMAGE_26_SUNBURST
+    if choice == 'grok_detail':
+        return REAPI_OFFICIAL
     if choice != 'grok':
         raise ValueError('Недопустимая модель reAPI')
+    # Standard has no image-to-image and excludes 4:5: retain safe official fallback.
     return REAPI_STANDARD if mode == 'text' and aspect in STANDARD_RATIOS else REAPI_OFFICIAL
 
 
@@ -147,14 +156,17 @@ def _reapi(prompt,mode,reference_url,aspect,model_choice='grok'):
     if mode=='reference' and not reference_url:raise ProviderError('Не загружен референс',definite=True)
     headers={'Authorization':f'Bearer {key}','Content-Type':'application/json'}
     model = reapi_model(model_choice,mode,aspect)
-    if model_choice == 'gpt_image_26':
+    if model_choice in ('gpt_image_26', 'gpt_image_26_flare', 'gpt_image_26_sunburst'):
         # Documented GPT-Image-2.6 API: static PNG, n=1, dimensions divisible by 16.
         body={'model':model,'prompt':prompt,'n':1,'output_format':'png',
               'quality':'medium','size':GPT_IMAGE_26_SIZES[aspect]}
         if mode=='reference':body['image_urls']=[reference_url]
-    elif model_choice == 'nano_banana_21':
+    elif model_choice in ('nano_banana_21', 'nano_banana_pro'):
         # Nano Banana 2.1 accepts 4:5 and does not accept 'n'.
-        body={'model':model,'prompt':prompt,'aspect_ratio':aspect,'resolution':'2k'}
+        if model_choice == 'nano_banana_pro':
+            body={'model':model,'prompt':prompt,'size':aspect,'resolution':'2K'}
+        else:
+            body={'model':model,'prompt':prompt,'aspect_ratio':aspect,'resolution':'2k'}
         if mode=='reference':body['image_urls']=[reference_url]
     else:
         standard = model == REAPI_STANDARD
@@ -163,7 +175,9 @@ def _reapi(prompt,mode,reference_url,aspect,model_choice='grok'):
         requested_aspect='3:4' if aspect=='4:5' else aspect
         if standard:body['size']=requested_aspect
         else:
-            body.update({'aspect_ratio':requested_aspect,'resolution':'1k','quality':'medium'})
+            body.update({'aspect_ratio':requested_aspect,
+                         'resolution':'2k' if model_choice == 'grok_detail' else '1k',
+                         'quality':'medium'})
             if mode=='reference':body['image_urls']=[reference_url]
     start=time.monotonic()
     try:r=requests.post(REAPI_BASE+'/images/generations',headers=headers,json=body,timeout=(10,35))
