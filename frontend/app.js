@@ -1,5 +1,5 @@
 'use strict';
-// IGK v13: unified generation, safe model selection, restorer-style payments and ledger.
+// IGK v14: unified generation, safe model selection, restorer-style payments and ledger.
 // The source of truth for money remains YDB; never infer a second debit on "payment".
 const $ = id => document.getElementById(id);
 const base = (window.APP_CONFIG?.API_BASE || '').replace(/\/$/, '');
@@ -23,7 +23,8 @@ const statusName = s => ({completed:'Готово', failed:'Ошибка', unkno
 const modelName = value => ({
   'grok-imagine-image-2-0':'Grok Imagine 2.0',
   'grok-imagine-image-2.0-official':'Grok Imagine 2.0 1K',
-  'nano-banana-2.1':'Nano Banana 2.1 2K'
+  'nano-banana-2.1':'Nano Banana 2.1 2K',
+  'gpt-image-2.6-flare':'GPT Image 2.6'
 }[value] || (value ? String(value) : ''));
 const kindName = kind => ({text:'По тексту', reference:'По фотографии'}[kind] || 'Генерация');
 const safeHttps = value => {
@@ -38,7 +39,7 @@ const el = (tag, className = '', content = '') => {
 };
 
 let token = '', active = false, referenceKey = '', busy = false, pendingRequestId = '';
-let modelPrices = {grok:1000}, allowedModels=['grok'];
+let modelPrices = {grok:750, nano_banana_21:750, gpt_image_26:750}, allowedModels=['grok'];
 let currentHistory = {jobs:[], movements:[]};
 let currentWallet = {available:0, held:0};
 let paymentOrdersById = new Map();
@@ -258,7 +259,7 @@ $('reference-toggle').onchange = () => {
   $('reference').value = '';
   $('reference-preview').removeAttribute('src');
   $('reference-preview').classList.add('hidden');
-  $('reference-status').textContent = 'Файл будет загружен в закрытое хранилище.';
+  $('reference-status').textContent = '';
   $('rights').checked = false;
   $('reference-panel').classList.toggle('hidden', !$('reference-toggle').checked);
   check();

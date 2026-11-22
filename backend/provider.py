@@ -17,6 +17,9 @@ REAPI_BASE='https://reapi.ai/api/v1'
 REAPI_STANDARD='grok-imagine-image-2-0'
 REAPI_OFFICIAL='grok-imagine-image-2.0-official'
 REAPI_NANO_21='nano-banana-2.1'
+REAPI_GPT_IMAGE_26='gpt-image-2.6-flare'
+GPT_IMAGE_26_SIZES={'1:1':'1024x1024','4:5':'1024x1280','3:2':'1536x1024',
+                    '2:3':'1024x1536','16:9':'1536x864','9:16':'864x1536'}
 STANDARD_RATIOS={'1:1','2:3','3:2','9:16','16:9'}
 
 class ProviderError(RuntimeError):
@@ -131,6 +134,8 @@ def _download_reapi_image(url,task_id):
 def reapi_model(choice,mode,aspect):
     if choice == 'nano_banana_21':
         return REAPI_NANO_21
+    if choice == 'gpt_image_26':
+        return REAPI_GPT_IMAGE_26
     if choice != 'grok':
         raise ValueError('Недопустимая модель reAPI')
     return REAPI_STANDARD if mode == 'text' and aspect in STANDARD_RATIOS else REAPI_OFFICIAL
@@ -142,7 +147,12 @@ def _reapi(prompt,mode,reference_url,aspect,model_choice='grok'):
     if mode=='reference' and not reference_url:raise ProviderError('Не загружен референс',definite=True)
     headers={'Authorization':f'Bearer {key}','Content-Type':'application/json'}
     model = reapi_model(model_choice,mode,aspect)
-    if model_choice == 'nano_banana_21':
+    if model_choice == 'gpt_image_26':
+        # Documented GPT-Image-2.6 API: static PNG, n=1, dimensions divisible by 16.
+        body={'model':model,'prompt':prompt,'n':1,'output_format':'png',
+              'quality':'medium','size':GPT_IMAGE_26_SIZES[aspect]}
+        if mode=='reference':body['image_urls']=[reference_url]
+    elif model_choice == 'nano_banana_21':
         # Nano Banana 2.1 accepts 4:5 and does not accept 'n'.
         body={'model':model,'prompt':prompt,'aspect_ratio':aspect,'resolution':'2k'}
         if mode=='reference':body['image_urls']=[reference_url]

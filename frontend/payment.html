@@ -2,11 +2,11 @@
 <html lang="ru"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#f5efe7"><title>Пополнение баланса · ИИ-ГенераторКартинок</title>
-<link rel="stylesheet" href="styles.css?v=igk-v13-final">
+<link rel="stylesheet" href="styles.css?v=igk-v14">
 <script src="https://st.max.ru/js/max-web-app.js"></script><script src="config.js"></script>
 </head><body class="payment-page">
 <main class="wrap">
-<header class="masthead"><span class="brand-mark">✦</span><div><span class="eyebrow">ЦИФРОВОЕ АТЕЛЬЕ · MAX</span><h1>Пополнение баланса</h1><p>Оплата по СБП и подтверждение платежа</p></div></header>
+<header class="masthead"><span class="brand-mark">✦</span><div><span class="eyebrow">ЦИФРОВОЕ АТЕЛЬЕ</span><h1>Пополнение баланса</h1><p>Оплата по СБП и подтверждение платежа</p></div></header>
 <section class="panel" id="gate"><span class="tag">Проверка доступа</span><h2 id="gate-title">Подключаемся…</h2><p id="gate-message" class="muted">Проверяем MAX.</p><button id="retry" class="button outline hidden" type="button">Повторить</button></section>
 <div id="workspace" class="hidden">
 <a class="button outline back-link" href="index.html">← Вернуться к генерации</a>
@@ -26,17 +26,6 @@
 </div>
 <p class="fine">Подтверждение клиента не означает зачисление: администратор сверяет поступление с выпиской ВТБ, после чего начисляет кредиты.</p>
 </section>
-<section id="pay-admin" class="panel hidden"><div class="eyebrow">АДМИНИСТРАТОР</div><h2>Управление пополнениями</h2><p class="fine">Только администратор. Перед подтверждением обязательно сверьте фактическое поступление в ВТБ и оформите чек НПД.</p>
-<button id="admin-reload" type="button" class="button outline">Обновить заявки</button><div id="admin-orders" class="payment-admin-list">Заявок пока нет.</div>
-<div id="admin-detail" class="payment-admin-card hidden">
-<strong id="admin-order-title"></strong><p id="admin-order-description" class="hint"></p>
-<a id="admin-proof-link" class="button outline hidden" target="_blank" rel="noopener noreferrer">Открыть подтверждение клиента / PDF</a>
-<label>Номер банковской операции или уникальное описание по выписке ВТБ<input id="admin-bank-reference" type="text" autocomplete="off" maxlength="140" placeholder="Номер или дата и время поступления"></label>
-<label>Фактически получено, ₽<input id="admin-bank-amount" type="number" min="0.01" step="0.01"></label>
-<label>Номер или HTTPS-ссылка на чек НПД<input id="admin-receipt" type="text" autocomplete="off" maxlength="300" placeholder="https://... или номер чека"></label>
-<button id="admin-approve" type="button" class="button primary">Проверено в ВТБ — начислить</button>
-<p id="admin-message" class="status" aria-live="polite"></p>
-</div></section>
 </div>
 <footer><span>ИИ-услуги и цифровые решения</span><div class="legal-links"><a data-legal href="legal/offer.html">Публичная оферта</a><a data-legal href="legal/privacy.html">Конфиденциальность</a><a data-legal href="legal/refunds.html">Возвраты</a></div></footer>
 </main>
@@ -46,5 +35,5 @@
 <a id="pay-link" class="button primary hidden" target="_blank" rel="noopener noreferrer">Оплатить по ссылке</a><button type="button" id="pay-qr-back" class="button outline" style="margin-top:12px;width:100%">Вернуться к заявке</button>
 </div></div>
 <div id="legal-overlay" class="overlay hidden" role="dialog" aria-modal="true" aria-label="Юридический документ"><div class="modal legal-modal"><div class="modal-top"><strong>Документы ИИ-ГенератораКартинок</strong><button type="button" class="button outline" id="legal-close">← Вернуться к пополнению</button></div><iframe id="legal-frame" title="Юридический документ" loading="lazy"></iframe></div></div>
-<script src="payment.js?v=igk-v13-final"></script>
+<script src="payment.js?v=igk-v14"></script>
 </body></html>
