@@ -308,6 +308,20 @@ document.querySelectorAll('[data-legal]').forEach(link => link.addEventListener(
   $('legal-frame').src = link.getAttribute('href');
   $('legal-overlay').classList.remove('hidden');
 }));
+// The embedded legal pages have their own back link (sometimes to the restorer).
+// Keep only the return button in the main application's document dialog.
+$('legal-frame').addEventListener('load', () => {
+  try {
+    const documentInside = $('legal-frame').contentDocument;
+    if (!documentInside) return;
+    for (const control of documentInside.querySelectorAll('a, button')) {
+      const caption = (control.textContent || '').replace(/\s+/g, ' ').trim();
+      if (/^(?:←\s*)?Вернуться\s+(?:в|к)\s+/iu.test(caption)) control.remove();
+    }
+  } catch (_) {
+    // A different-origin document cannot be modified by the parent page.
+  }
+});
 $('legal-close').onclick = () => {
   $('legal-overlay').classList.add('hidden');
   $('legal-frame').removeAttribute('src');

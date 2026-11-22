@@ -114,3 +114,238 @@
 #admin-orders[aria-busy="true"] {opacity:.8}
 #admin-reload {margin-top:12px;width:100%}
 @media(max-width:550px){.payment-admin-detail{padding:12px}.admin-order-select{font-size:12px!important}}
+
+/* Payment page only: full-width controls, as in the photo restorer. */
+.payment-page #payment-panel .payment-controls {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+}
+.payment-page #payment-panel .payment-controls > select,
+.payment-page #payment-panel .payment-controls > .button,
+.payment-page #payment-panel .pay-order-detail,
+.payment-page #payment-panel .payment-order-list,
+.payment-page #payment-panel #pay-proof-file,
+.payment-page #payment-panel #pay-submit,
+.payment-page #payment-panel #pay-qr-button {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+}
+.payment-page #payment-panel .pay-order-detail {box-sizing:border-box;}
+.payment-page #payment-panel .sbp-button {
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    gap:10px;
+}
+/* Three-colour SBP mark from the restorer: orange, violet, green. */
+.payment-page #payment-panel .sbp-mini-mark {
+    position:relative;
+    display:inline-block;
+    flex:0 0 21px;
+    width:21px;
+    height:24px;
+    margin-left:0;
+    transform:none;
+}
+.payment-page #payment-panel .sbp-mini-mark i {
+    position:absolute;
+    display:block;
+    width:13px;
+    height:11px;
+    border-radius:0;
+    clip-path:polygon(0 0,100% 50%,0 100%);
+}
+.payment-page #payment-panel .sbp-mini-mark i:nth-child(1) {left:1px;top:0;background:#f28d26;}
+.payment-page #payment-panel .sbp-mini-mark i:nth-child(2) {left:6px;top:7px;background:#5c3db9;}
+.payment-page #payment-panel .sbp-mini-mark i:nth-child(3) {left:1px;top:14px;background:#1ca65b;}
+
+/* Payment QR window ONLY: layout matching the Restorer payment screen. */
+.sbp-dialog.overlay {
+    display: block;
+    padding: 0;
+    background: #fff;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+.sbp-dialog .sbp-layout.modal {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: none;
+    min-height: 100dvh;
+    max-height: none;
+    margin: 0;
+    padding: 0;
+    border-radius: 0;
+    overflow: visible;
+    background: #fff;
+    box-shadow: none;
+    text-align: left;
+    color: #172333;
+}
+.sbp-dialog .sbp-page-header {
+    height: 44px;
+    min-height: 44px;
+    display: grid;
+    place-items: center;
+    border-bottom: 1px solid #f5f6f8;
+    font: 700 14px/1.2 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #181818;
+}
+.sbp-dialog .sbp-page-body {
+    width: 100%;
+    max-width: 1150px;
+    min-height: calc(100dvh - 44px);
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.sbp-dialog .sbp-summary {
+    background: #f5f7fa;
+    padding: 78px 68px 60px;
+}
+.sbp-dialog .sbp-summary h2 {
+    margin: 0 0 32px;
+    font: 400 clamp(27px, 3vw, 37px)/1.22 Georgia, 'Times New Roman', serif;
+    color: #17253a;
+}
+.sbp-dialog .sbp-summary .sbp-summary-description {
+    margin: 0 0 60px;
+    color: #7185a0;
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.sbp-dialog #sbp-modal-sum {
+    display: block;
+    margin: 0 0 5px;
+    font: 700 42px/1.18 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #212b38;
+}
+.sbp-dialog #sbp-modal-credits {
+    margin: 0;
+    color: #526780;
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.sbp-dialog .sbp-summary-divider {
+    width: 100%;
+    height: 1px;
+    background: #e4e9f0;
+    margin: 30px 0 26px;
+}
+.sbp-dialog .sbp-summary .sbp-order,
+.sbp-dialog .sbp-summary .sbp-recipient {
+    margin: 0 0 16px;
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #3d4b62;
+}
+.sbp-dialog .sbp-summary .sbp-summary-hint {
+    margin: 34px 0 0;
+    color: #8190a9;
+    font: 12px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.sbp-dialog .sbp-payment {
+    background: #fff;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 170px 30px 55px;
+    min-width: 0;
+}
+.sbp-dialog .sbp-payment-inner {
+    width: min(100%, 385px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+.sbp-dialog .sbp-wordmark {
+    display: inline-flex;
+    gap: 14px;
+    align-items: center;
+    margin-bottom: 24px;
+    font: 800 28px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #0a1729;
+}
+.sbp-dialog .sbp-wordmark-symbol {
+    position: relative;
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    border: 2px solid #008ad7;
+    transform: rotate(45deg) scale(.78);
+}
+.sbp-dialog .sbp-wordmark-symbol::after {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border: 2px solid #008ad7;
+}
+.sbp-dialog .sbp-payment .sbp-payment-description {
+    margin: 0 0 29px;
+    color: #849bb4;
+    font: 13px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.sbp-dialog .sbp-qr-card {
+    display: flex;
+    width: min(100%, 290px);
+    min-height: 290px;
+    align-items: center;
+    justify-content: center;
+    padding: 15px;
+    border-radius: 22px;
+    background: #fff;
+    box-shadow: 0 4px 18px #17233325;
+}
+.sbp-dialog .sbp-qr-card #pay-qr {
+    width: 100%;
+    height: auto;
+    max-width: 260px;
+    max-height: 260px;
+    object-fit: contain;
+    margin: 0;
+}
+.sbp-dialog #pay-qr:not([src]) {display: none;}
+.sbp-dialog #pay-qr-error {text-align: center;}
+.sbp-dialog #pay-link.sbp-bank-link {
+    width: auto;
+    min-width: 150px;
+    margin-top: 25px;
+    padding: 10px 15px;
+    min-height: 42px;
+    font-size: 12px;
+    background: #fff;
+    color: #895f46;
+    border: 1px solid #cbb39f;
+    border-radius: 12px;
+}
+.sbp-dialog #pay-qr-back.sbp-return-button {
+    width: 100% !important;
+    min-height: 42px;
+    margin-top: 36px !important;
+    background: #fff;
+    color: #1b63d7;
+    border: 1px solid #5b98fa;
+    border-radius: 11px;
+    font-size: 12px;
+}
+.sbp-dialog #pay-qr-back.sbp-return-button:hover {background:#f4f8ff;}
+@media (max-width: 760px) {
+    .sbp-dialog .sbp-page-body {grid-template-columns: 1fr;min-height: auto;}
+    .sbp-dialog .sbp-summary {padding: 26px 26px 24px;}
+    .sbp-dialog .sbp-summary h2 {margin-bottom: 14px;}
+    .sbp-dialog .sbp-summary .sbp-summary-description {margin-bottom: 24px;}
+    .sbp-dialog #sbp-modal-sum {font-size: 34px;}
+    .sbp-dialog .sbp-summary-divider {margin: 16px 0;}
+    .sbp-dialog .sbp-summary .sbp-recipient {margin-bottom: 0;}
+    .sbp-dialog .sbp-summary .sbp-summary-hint {margin-top: 14px;}
+    .sbp-dialog .sbp-payment {padding: 32px 25px 38px;}
+    .sbp-dialog .sbp-payment .sbp-payment-description {margin-bottom: 24px;}
+    .sbp-dialog #pay-qr-back.sbp-return-button {margin-top: 25px !important;}
+    .sbp-dialog .sbp-desktop-break {display:none;}
+}
+@media (max-width: 380px) {
+    .sbp-dialog .sbp-summary {padding: 23px 19px;}
+    .sbp-dialog .sbp-payment {padding: 26px 19px 34px;}
+    .sbp-dialog .sbp-qr-card {min-height: 0;}
+}

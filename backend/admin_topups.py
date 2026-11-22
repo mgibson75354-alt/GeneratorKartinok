@@ -187,15 +187,21 @@ class AdminTopups:
         return changed
 
     def enrich_user_orders(self, orders):
-        # Only paid orders may publish an NPD receipt link to the paying client.
-        for order in orders:
-            if order.get('status') == 'paid':
-                m = self.metadata(order['order_id'])
-                if m['receipt_url']:
-                    order['receipt'] = m['receipt_url']
-            elif order.get('status') == 'review':
-                m = self.metadata(order['order_id'])
-                if m['clarify_reason']:
-                    order['status'] = 'clarify'
-                    order['clarify_reason'] = m['clarify_reason']
-        return orders
+        # The customer-facing list must respect admin cancellation, hiding,
+        # and archival. These operations preserve financial records in YDB.
+        visible = []
+        for source in orders:
+            order = dict(source)
+            if order.get('status') in ('cancelled', 'canceled'):
+                continue
+            m = self.metadata(order['order_id'])
+            if m['hidden'] or m['archived']:
+                continue
+            # Publish NPD receipt URLs only for successfully paid orders.
+            if order.get('status') == 'paid' and m['receipt_url']:
+                order['receipt'] = m['receipt_url']
+            elif order.get('status') == 'review' and m['clarify_reason']:
+                order['status'] = 'clarify'
+                order['clarify_reason'] = m['clarify_reason']
+            visible.append(order)
+        return visible
