@@ -22,9 +22,11 @@ const statusName = s => ({completed:'Готово', failed:'Ошибка', unkno
   reserved:'В обработке', pending:'В обработке', cancelled:'Отменено'}[s] || 'В обработке');
 const modelName = value => ({
   'grok-imagine-image-2-0':'Grok Imagine 2.0',
-  'grok-imagine-image-2.0-official':'Grok Imagine 2.0 1K',
+  'grok-imagine-image-2.0-official':'Grok Imagine 2.0 Official',
   'nano-banana-2.1':'Nano Banana 2.1 2K',
-  'gpt-image-2.6-flare':'GPT Image 2.6'
+  'gpt-image-2.6-flare':'GPT Image 2.6 Flare',
+  'gpt-image-2.6-sunburst':'GPT Image 2.6 Sunburst',
+  'gemini-3-pro-image-preview':'Nano Banana Pro 2K'
 }[value] || (value ? String(value) : ''));
 const kindName = kind => ({text:'По тексту', reference:'По фотографии'}[kind] || 'Генерация');
 const safeHttps = value => {
@@ -39,7 +41,7 @@ const el = (tag, className = '', content = '') => {
 };
 
 let token = '', active = false, referenceKey = '', busy = false, pendingRequestId = '';
-let modelPrices = {grok:750, nano_banana_21:750, gpt_image_26:750}, allowedModels=['grok'];
+let modelPrices = {grok:500, grok_detail:750, gpt_image_26_flare:500, gpt_image_26_sunburst:750, nano_banana_21:500, nano_banana_pro:750}, allowedModels=['grok'];
 let currentHistory = {jobs:[], movements:[]};
 let currentWallet = {available:0, held:0};
 let paymentOrdersById = new Map();

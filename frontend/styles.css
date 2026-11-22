@@ -349,3 +349,6 @@
     .sbp-dialog .sbp-payment {padding: 26px 19px 34px;}
     .sbp-dialog .sbp-qr-card {min-height: 0;}
 }
+
+/* Payment page: space between receipt-file picker and confirmation button. */
+.payment-page #payment-panel #pay-submit { margin-top: 14px; }

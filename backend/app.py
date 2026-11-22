@@ -46,7 +46,7 @@ class SignIn(BaseModel):
 class Generate(BaseModel):
     request_id: str=Field(min_length=8,max_length=120)
     provider: Literal['reapi','proxyapi']='reapi'  # Backward compatible; server always uses reAPI.
-    model: Literal['grok','nano_banana_21','gpt_image_26']='grok'
+    model: Literal['grok','grok_detail','nano_banana_21','nano_banana_pro','gpt_image_26','gpt_image_26_flare','gpt_image_26_sunburst']='grok'
     prompt: str=Field(min_length=10,max_length=1800)
     style: Literal['realistic','advertising','illustration','cinematic','art']='realistic'
     aspect: Literal['1:1','4:5','3:2','2:3','16:9','9:16']='4:5'
@@ -71,15 +71,20 @@ class Resolve(BaseModel):
     output_key: str=''
     note: str=''
 
-# 0,75 user credits = 750 kopeks; one user credit is 10 RUB.
-# Keep the amount server-side so old environment variables cannot cause
-# the displayed price and the actual YDB reserve to differ.
-GENERATION_PRICE_KOPEKS = 750
+# User credit = 1000 internal units (10 RUB).
+# Prices are server-side, ensuring the displayed price matches YDB reserve.
+GENERATION_PRICE_KOPEKS = 500
 
 def model_prices():
-    return {'grok': GENERATION_PRICE_KOPEKS,
-            'nano_banana_21': GENERATION_PRICE_KOPEKS,
-            'gpt_image_26': GENERATION_PRICE_KOPEKS}
+    return {
+        'grok': 500,
+        'grok_detail': 750,
+        'gpt_image_26': 500,  # legacy alias of Flare
+        'gpt_image_26_flare': 500,
+        'gpt_image_26_sunburst': 750,
+        'nano_banana_21': 500,
+        'nano_banana_pro': 750,
+    }
 
 @app.get('/api/health')
 def health():return {'status':'ok','project':'image-generator','database':'ydb'}
@@ -139,7 +144,7 @@ def profile(uid:str=Depends(user)):
             'provider_selector_visible':config.flag('PROVIDER_SELECTOR_VISIBLE'),
             'provider_default':'reapi',
             'available_providers':['reapi'] if os.getenv('REAPI_API_KEY') else [],
-            'available_models':['grok','nano_banana_21','gpt_image_26'] if os.getenv('REAPI_API_KEY') else [],
+            'available_models':['grok','grok_detail','gpt_image_26_flare','gpt_image_26_sunburst','nano_banana_21','nano_banana_pro'] if os.getenv('REAPI_API_KEY') else [],
             'model_prices':model_prices()}
 
 @app.get('/api/history')
