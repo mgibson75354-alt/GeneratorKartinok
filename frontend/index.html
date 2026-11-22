@@ -2,7 +2,7 @@
 <html lang="ru"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#f5efe7"><title>ИИ-ГенераторКартинок</title>
-<link rel="stylesheet" href="styles.css?v=igk-v14">
+<link rel="stylesheet" href="styles.css?v=igk-v15-admin">
 <script src="https://st.max.ru/js/max-web-app.js"></script><script src="config.js"></script>
 </head><body>
 <main class="wrap">
@@ -23,7 +23,31 @@
 <section class="panel hidden" id="result-panel"><div class="eyebrow">02 / РЕЗУЛЬТАТ</div><h2>Ваше изображение</h2><img id="result-image" class="result-image" alt="Сгенерированное изображение"><div class="action-row"><a id="download" class="button primary" target="_blank" rel="noopener noreferrer">Открыть / скачать</a><button type="button" class="button outline" id="new-image">Создать ещё</button></div></section>
 <section class="panel"><div class="eyebrow">03 / АРХИВ</div><h2>История генераций</h2><div id="history" class="history-list history-scroll" tabindex="0" aria-label="История генераций. Прокрутка списка">История пока пуста.</div><button id="history-more" type="button" class="button outline history-more hidden">Показать ещё генерации</button><p class="fine">Нажмите на запись готовой генерации, чтобы открыть изображение.</p></section>
 <section class="panel"><div class="eyebrow">04 / БАЛАНС</div><h2>Пополнение - резерв - оплата</h2><div id="movements" class="history-list history-scroll" tabindex="0" aria-label="Баланс. Прокрутка списка">Операций пока нет.</div><button id="movements-more" type="button" class="button outline history-more hidden">Показать ещё операции</button></section>
-<section class="panel hidden" id="provider-audit-panel"><div class="eyebrow">05 / АДМИНИСТРАТОР</div><h2>Журнал генераций</h2><p class="fine">Только для администратора. Данные о выполнении и расходах reAPI.</p><button type="button" class="button outline" id="provider-audit-refresh">Обновить журнал</button><div id="provider-audit-list" class="history-list">Нажмите «Обновить журнал».</div></section>
+<section class="panel hidden" id="pay-admin">
+<div class="eyebrow">05 / УПРАВЛЕНИЕ ПОПОЛНЕНИЯМИ</div>
+<h2>Заявки на пополнение</h2>
+<p class="fine">Сверьте фактическое поступление в ВТБ. Прикреплённый клиентом файл не подтверждает оплату.</p>
+<div id="admin-order-detail" class="payment-admin-detail hidden">
+<button id="admin-close-detail" type="button" class="button outline admin-close">Свернуть заявку</button>
+<strong id="admin-order-title"></strong>
+<p id="admin-order-description" class="hint"></p>
+<img id="admin-proof-image" alt="Банковское подтверждение от клиента" class="admin-proof-image hidden">
+<a id="admin-proof-link" class="button outline hidden" target="_blank" rel="noopener noreferrer">Открыть подтверждение клиента / PDF</a>
+<label>Номер операции или описание перевода из выписки ВТБ<input id="admin-bank-reference" type="text" maxlength="120" autocomplete="off" placeholder="Номер операции или «Перевод по номеру телефона»"></label>
+<label class="admin-bank-mode"><input id="admin-bank-no-number" type="checkbox"> В выписке нет номера операции (перевод по номеру телефона)</label>
+<div id="admin-bank-no-number-fields" class="hidden"><label>Дата и время поступления по выписке ВТБ (МСК)<input id="admin-bank-received-at" type="datetime-local" step="1"></label><p class="hint">Указывайте время реального поступления из банка, а не время создания заявки. Сочетание суммы и времени защищает от повторного начисления. Если по одной сумме есть два перевода с одинаковым временем, требуется дополнительная сверка.</p></div>
+<label>Фактически поступило, ₽<input id="admin-bank-amount" type="number" min="0" step="0.01"></label>
+<label>Номер чека НПД<input id="admin-receipt-number" type="text" maxlength="100" autocomplete="off" placeholder="Номер чека Мой налог"></label>
+<label>Ссылка на чек НПД<input id="admin-receipt-url" type="url" maxlength="1500" placeholder="https://..."></label>
+<button id="admin-approve" type="button" class="button primary wide">Проверено в ВТБ — начислить</button>
+<label>Причина уточнения<input id="admin-clarify-reason" type="text" maxlength="300" placeholder="Например, сумма не совпадает"></label>
+<button id="admin-clarify" type="button" class="button outline">Запросить уточнение</button>
+<p id="admin-pay-message" class="hint" role="status" aria-live="polite"></p>
+</div>
+<label class="admin-show-archived"><input type="checkbox" id="admin-show-hidden"> Показать скрытые заявки</label>
+<div id="admin-orders" class="history-list history-scroll admin-orders-list" tabindex="0" aria-label="Заявки на пополнение">Пока нет заявок.</div>
+<button id="admin-reload" type="button" class="button outline">Обновить список заявок</button>
+</section>
 </div><footer><span>ИИ-услуги и цифровые решения</span><div class="legal-links"><a data-legal="1" href="legal/offer.html">Публичная оферта</a><a data-legal="1" href="legal/privacy.html">Конфиденциальность</a><a data-legal="1" href="legal/refunds.html">Возвраты</a><a data-legal="1" href="legal/photos.html">Обработка изображений</a></div></footer>
 </main><div id="legal-overlay" class="overlay hidden" role="dialog" aria-modal="true" aria-label="Документы ИИ-ГенератораКартинок"><div class="modal legal-modal"><div class="modal-top"><strong>Документы ИИ-ГенератораКартинок</strong><button type="button" class="button outline" id="legal-close">← Вернуться в приложение</button></div><iframe id="legal-frame" title="Юридический документ" loading="lazy"></iframe></div></div>
-<script src="app.js?v=igk-v14"></script></body></html>
+<script src="app.js?v=igk-v15-admin"></script></body></html>

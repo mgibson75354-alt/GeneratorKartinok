@@ -93,7 +93,9 @@ async function refresh() {
   // With PROVIDER_SELECTOR_VISIBLE=0 the backend enforces PROVIDER_DEFAULT=reapi.
   active = profile.generation_enabled === true && (profile.available_providers || []).includes('reapi') &&
     (profile.provider_selector_visible === true || profile.provider_default === 'reapi');
-  $('provider-audit-panel').classList.toggle('hidden', profile.admin !== true);
+  const isAdmin = profile.admin === true;
+  $('pay-admin').classList.toggle('hidden', !isAdmin);
+  if (isAdmin) void loadAdminOrders();
   allowedModels = Array.isArray(profile.available_models) && profile.available_models.length ? profile.available_models : ['grok'];
   modelPrices = profile.model_prices || {grok:profile.price};
   $('model').querySelectorAll('option').forEach(opt => opt.disabled = !allowedModels.includes(opt.value));
@@ -224,27 +226,6 @@ function renderMovements() {
 
 function renderHistory() { renderJobs(); renderMovements(); }
 
-async function loadProviderAudit() {
-  const list = $('provider-audit-list');
-  list.textContent = 'Загрузка журнала…';
-  try {
-    const data = await api('/api/admin/provider-usage');
-    list.replaceChildren();
-    for (const x of data.items || []) {
-      const usage = x.usage || {};
-      const caption = typeof usage.credits === 'number' ?
-        ` · ${usage.credits} кредитов reAPI ($${(usage.credits * .001).toFixed(3)})` : '';
-      const row = el('div', 'history-item admin-audit-item');
-      row.append(el('strong', '', `${x.provider || '—'} · ${x.status || '—'}`));
-      row.append(el('span', '', `${formatDate(x.updated_at)} ${formatTime(x.updated_at)} · ${x.model || '—'} · ${Number(x.seconds || 0) / 1000} с${caption}`));
-      row.append(el('span', '', `Задание: ${x.job_id || '—'} · ${x.task_id || '—'}`));
-      list.append(row);
-    }
-    if (!(data.items || []).length) list.textContent = 'Генераций пока нет.';
-  } catch (err) { list.textContent = 'Ошибка журнала: ' + err.message; }
-}
-
-$('provider-audit-refresh').onclick = loadProviderAudit;
 $('retry').onclick = login;
 $('history-more').onclick = () => { visibleJobs += HISTORY_FIRST_PAGE; renderJobs(); };
 $('movements-more').onclick = () => { visibleMovements += MOVEMENT_FIRST_PAGE; renderMovements(); };
@@ -331,4 +312,181 @@ $('legal-close').onclick = () => {
   $('legal-overlay').classList.add('hidden');
   $('legal-frame').removeAttribute('src');
 };
+
+// Управление пополнениями — только для администратора, по образцу фотореставратора.
+const adminStatus = s => ({pending:'Ожидает оплаты',review:'На проверке',clarify:'Требуется уточнение',
+  paid:'Кредиты начислены',cancelled:'Отменена'}[s] || s || '—');
+let adminListSequence = 0, adminSelectionSequence = 0, selectedAdminOrder = null;
+async function loadAdminOrders() {
+  const seq = ++adminListSequence;
+  const hidden = $('admin-show-hidden').checked;
+  const list = $('admin-orders');
+  list.setAttribute('aria-busy', 'true');
+  if (!list.querySelector('[data-admin-order-id]')) list.textContent = 'Загружаем заявки…';
+  try {
+    const response = await api('/api/admin/orders' + (hidden ? '?include_hidden=true' : ''));
+    if (seq !== adminListSequence) return;
+    if (!Array.isArray(response.orders)) throw Error('Неверный формат списка заявок');
+    const fragment = document.createDocumentFragment();
+    for (const order of response.orders) {
+      const card = el('div', 'history-item admin-order-card');
+      card.dataset.adminOrderId = order.order_id;
+      card.classList.toggle('admin-order-selected', selectedAdminOrder?.order_id === order.order_id);
+      const select = el('button', 'admin-order-select', `${order.order_id.slice(0,12)} · ${rubles(order.amount)} · ${adminStatus(order.status)} · MAX ID ${order.user_id} · ${formatDate(order.created_at)} ${formatTime(order.created_at)}`);
+      select.type = 'button';
+      select.setAttribute('aria-pressed', String(selectedAdminOrder?.order_id === order.order_id));
+      select.addEventListener('click', () => { void selectAdminOrder(order); });
+      card.append(select);
+      const actions = el('div', 'admin-order-actions');
+      if (hidden) {
+        const restore = el('button', 'admin-order-action', 'Восстановить в списке');
+        restore.type = 'button';
+        restore.onclick = () => { void adminChangeOrder(order, 'restore', 'Вернуть заявку в рабочий список?'); };
+        actions.append(restore);
+        const archive = el('button', 'admin-order-action', 'Убрать из архива');
+        archive.type = 'button';
+        archive.onclick = () => { void adminChangeOrder(order, 'archive', 'Убрать заявку из всех рабочих списков? Запись останется в YDB.'); };
+        actions.append(archive);
+      } else {
+        if (order.status === 'pending') {
+          const cancel = el('button', 'admin-order-action', 'Отменить');
+          cancel.type = 'button';
+          cancel.onclick = () => { void adminChangeOrder(order, 'cancel', 'Проверьте, что деньги не поступили в ВТБ. Отменить неоплаченную заявку?'); };
+          actions.append(cancel);
+        }
+        const hide = el('button', 'admin-order-action', 'Скрыть заявку');
+        hide.type = 'button';
+        hide.onclick = () => { void adminChangeOrder(order, 'hide', 'Скрыть заявку? Финансовые записи и чеки сохранятся.'); };
+        actions.append(hide);
+      }
+      card.append(actions); fragment.append(card);
+    }
+    list.replaceChildren(fragment);
+    if (!response.orders.length) list.textContent = hidden ? 'Скрытых заявок пока нет.' : 'Заявок пока нет.';
+  } catch (error) {
+    if (seq === adminListSequence) list.replaceChildren(el('div', 'admin-list-error',
+      'Не удалось загрузить заявки: ' + error.message + '. Нажмите «Обновить список заявок».'));
+  } finally {
+    if (seq === adminListSequence) list.setAttribute('aria-busy', 'false');
+  }
+}
+function clearAdminSelection() {
+  adminSelectionSequence++;
+  selectedAdminOrder = null;
+  $('admin-order-detail').classList.add('hidden');
+  $('admin-orders').querySelectorAll('.admin-order-card').forEach(card => {
+    card.classList.remove('admin-order-selected');
+    card.querySelector('.admin-order-select')?.setAttribute('aria-pressed', 'false');
+  });
+}
+async function adminChangeOrder(order, action, confirmation) {
+  if (!window.confirm(confirmation)) return;
+  try {
+    await api(`/api/admin/orders/${encodeURIComponent(order.order_id)}/${action}`,
+      {method:'POST'});
+    if (selectedAdminOrder?.order_id === order.order_id) clearAdminSelection();
+    await loadAdminOrders();
+    $('admin-pay-message').textContent = ({cancel:'Заявка отменена.',hide:'Заявка скрыта.',
+      archive:'Заявка убрана из списков.',restore:'Заявка восстановлена.'})[action] || '';
+  } catch (error) { $('admin-pay-message').textContent = error.message; }
+}
+async function selectAdminOrder(order) {
+  const seq = ++adminSelectionSequence;
+  selectedAdminOrder = order;
+  $('admin-order-detail').classList.remove('hidden');
+  $('admin-order-title').textContent = 'Заявка ' + order.order_id.slice(0,12);
+  $('admin-order-description').textContent = `MAX ID ${order.user_id} · ${rubles(order.amount)} · ${adminStatus(order.status)} · ${formatDate(order.created_at)} ${formatTime(order.created_at)}`;
+  $('admin-pay-message').textContent = 'Загружаем заявку…';
+  $('admin-approve').disabled = true;
+  $('admin-clarify').disabled = true;
+  $('admin-proof-image').classList.add('hidden');
+  $('admin-proof-link').classList.add('hidden');
+  $('admin-orders').querySelectorAll('.admin-order-card').forEach(card => {
+    const active = card.dataset.adminOrderId === order.order_id;
+    card.classList.toggle('admin-order-selected', active);
+    card.querySelector('.admin-order-select')?.setAttribute('aria-pressed', String(active));
+  });
+  try {
+    const detailed = await api('/api/admin/orders/' + encodeURIComponent(order.order_id));
+    if (seq !== adminSelectionSequence) return;
+    selectedAdminOrder = detailed;
+    $('admin-order-description').textContent = `MAX ID ${detailed.user_id} · ${rubles(detailed.amount)} · ${adminStatus(detailed.status)} · ${formatDate(detailed.created_at)} ${formatTime(detailed.created_at)}`;
+    const url = safeHttps(detailed.proof_url);
+    $('admin-proof-link').classList.toggle('hidden', !url);
+    $('admin-proof-image').classList.toggle('hidden', !url || !/\.(jpg|jpeg|png|webp)$/i.test((new URL(url || 'https://example.invalid')).pathname));
+    if (url) {
+      $('admin-proof-link').href = url;
+      if (!$('admin-proof-image').classList.contains('hidden')) $('admin-proof-image').src = url;
+    }
+    $('admin-bank-amount').value = (Number(detailed.amount)/100).toFixed(2);
+    $('admin-bank-no-number').checked = Boolean(detailed.bank_without_id);
+    $('admin-bank-no-number-fields').classList.toggle('hidden', !detailed.bank_without_id);
+    $('admin-bank-received-at').value = detailed.bank_received_at || '';
+    $('admin-bank-reference').value = detailed.bank_description || detailed.bank_reference || '';
+    $('admin-receipt-url').value = detailed.receipt_url || '';
+    $('admin-receipt-number').value = detailed.receipt_number || '';
+    $('admin-clarify-reason').value = detailed.clarify_reason || '';
+    $('admin-pay-message').textContent = 'Перед начислением проверьте платёж в выписке ВТБ и выдайте чек НПД.';
+    $('admin-approve').disabled = detailed.status !== 'review';
+    $('admin-clarify').disabled = detailed.status !== 'review';
+  } catch (error) {
+    if (seq === adminSelectionSequence) $('admin-pay-message').textContent = 'Не удалось загрузить заявку: ' + error.message;
+  }
+}
+$('admin-close-detail').onclick = clearAdminSelection;
+$('admin-reload').onclick = () => { void loadAdminOrders(); };
+$('admin-show-hidden').onchange = () => { clearAdminSelection(); void loadAdminOrders(); };
+$('admin-bank-no-number').onchange = () => {
+  const on = $('admin-bank-no-number').checked;
+  $('admin-bank-no-number-fields').classList.toggle('hidden', !on);
+  if (on && !$('admin-bank-reference').value.trim()) $('admin-bank-reference').value = 'Перевод по номеру телефона';
+};
+$('admin-approve').onclick = async () => {
+  if (!selectedAdminOrder || selectedAdminOrder.status !== 'review') return;
+  const reference = $('admin-bank-reference').value.trim();
+  const noId = $('admin-bank-no-number').checked;
+  const receivedAt = noId ? $('admin-bank-received-at').value : '';
+  const amount = Math.round(Number($('admin-bank-amount').value) * 100);
+  const receiptNumber = $('admin-receipt-number').value.trim();
+  const receiptUrl = $('admin-receipt-url').value.trim();
+  const warn = text => { $('admin-pay-message').textContent = text; };
+  if (reference.length < 6) return warn('Укажите номер или описание перевода из выписки ВТБ.');
+  if (noId && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(receivedAt))
+    return warn('Укажите дату и время фактического поступления из выписки ВТБ.');
+  if (!Number.isSafeInteger(amount) || amount !== Number(selectedAdminOrder.amount))
+    return warn('Сумма по выписке ВТБ должна совпадать с суммой заявки.');
+  if (!receiptNumber && !receiptUrl) return warn('Перед начислением оформите чек НПД и укажите его номер или ссылку.');
+  if (receiptUrl && !safeHttps(receiptUrl)) return warn('Ссылка на чек должна начинаться с https://');
+  if (!window.confirm('Поступление денег подтверждено в выписке ВТБ, чек НПД оформлен? Начислить кредиты?')) return;
+  const b = $('admin-approve'); b.disabled = true;
+  try {
+    await api('/api/admin/orders/' + encodeURIComponent(selectedAdminOrder.order_id) + '/approve', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+        bank_reference:reference, amount, receipt_number:receiptNumber,
+        receipt_url:receiptUrl, bank_without_id:noId, bank_received_at:receivedAt
+      })
+    });
+    $('admin-pay-message').textContent = 'Кредиты начислены. Повторное начисление заблокировано.';
+    selectedAdminOrder.status = 'paid';
+    await loadAdminOrders(); await refresh();
+  } catch (error) { $('admin-pay-message').textContent = 'Не удалось подтвердить начисление: ' + error.message; }
+  finally { b.disabled = selectedAdminOrder?.status !== 'review'; }
+};
+$('admin-clarify').onclick = async () => {
+  if (!selectedAdminOrder) return;
+  const reason = $('admin-clarify-reason').value.trim();
+  if (reason.length < 3) { $('admin-pay-message').textContent = 'Укажите причину уточнения.'; return; }
+  const b = $('admin-clarify'); b.disabled = true;
+  try {
+    await api('/api/admin/orders/' + encodeURIComponent(selectedAdminOrder.order_id) + '/clarify', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({reason})
+    });
+    $('admin-pay-message').textContent = 'Запрошено уточнение';
+    selectedAdminOrder.status = 'clarify';
+    $('admin-approve').disabled = true;
+    await loadAdminOrders();
+  } catch (error) { $('admin-pay-message').textContent = error.message; }
+  finally { b.disabled = selectedAdminOrder?.status !== 'review'; }
+};
+
 login();

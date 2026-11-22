@@ -6,7 +6,7 @@ const credits = k => (Number(k||0)/1000).toLocaleString('ru-RU',{minimumFraction
 const rubles = k => (Number(k||0)/100).toLocaleString('ru-RU',{style:'currency',currency:'RUB'});
 const dt = x => x ? new Date(x).toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'}) : 'Дата неизвестна';
 const safeHttps = u => {try {const a=new URL(u);return a.protocol==='https:' ? a.href : '';}catch{return '';}};
-const statusName = x => ({pending:'Ожидает оплаты',review:'На проверке',paid:'Кредиты начислены',cancelled:'Отменена'}[x]||x||'—');
+const statusName = x => ({pending:'Ожидает оплаты',review:'На проверке',clarify:'Требуется уточнение',paid:'Кредиты начислены',cancelled:'Отменена'}[x]||x||'—');
 let token='',currentOrder=null,paymentQr='',paymentLink='',orders=[];
 async function api(path,{method='GET',body=null}={}) {
   const isForm=body instanceof FormData;
@@ -58,12 +58,12 @@ function showOrder(o){
   currentOrder=o;
   $('pay-order').classList.remove('hidden');
   $('pay-order-summary').textContent=`Заявка ${o.order_id.slice(0,12)} · ${rubles(o.amount)} · ${statusName(o.status)}`;
-  const actionable=['pending','review'].includes(o.status);
+  const actionable=['pending','review','clarify'].includes(o.status);
   $('pay-proof').classList.toggle('hidden',!actionable);
   $('pay-qr-button').classList.toggle('hidden',!actionable||(!paymentQr&&!paymentLink));
   $('pay-start').classList.toggle('hidden',actionable);
   $('pay-proof-file').value='';
-  info('pay-message','');
+  info('pay-message',o.status === 'clarify' ? ('Требуется уточнение: '+(o.clarify_reason||'Загрузите новое подтверждение.')) : '');
   $('pay-my-orders').querySelectorAll('.payment-order-card').forEach(b=>b.classList.toggle('selected',b.textContent.startsWith(dt(o.created_at))));
 }
 $('pay-amount').onchange=()=>{currentOrder=null;$('pay-order').classList.add('hidden');$('pay-start').classList.remove('hidden');};

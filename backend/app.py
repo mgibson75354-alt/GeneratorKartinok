@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from . import auth, config, provider
 from .storage import Store,Conflict
 from .images import Images,image_type
+from .admin_topups import AdminTopups
 
 app=FastAPI(title='ИИ-ГенераторКартинок API',docs_url=None,redoc_url=None)
 origin=os.getenv('FRONTEND_ORIGIN','').rstrip('/')
@@ -23,6 +24,9 @@ app.add_middleware(CORSMiddleware,allow_origins=[origin] if origin else [],
 def db():return Store()
 @lru_cache(maxsize=1)
 def images():return Images()
+
+@lru_cache(maxsize=1)
+def admin_topups():return AdminTopups(db())
 
 
 def user(x_app_authorization: str | None=Header(None,alias='X-App-Authorization')):
@@ -56,7 +60,11 @@ class NewOrder(BaseModel):
 class Approve(BaseModel):
     bank_reference: str=Field(min_length=8,max_length=140)
     amount: int
-    receipt: str=Field(min_length=1,max_length=300)
+    receipt: str=Field(default='',max_length=300)
+    receipt_number: str=Field(default='',max_length=100)
+    receipt_url: str=Field(default='',max_length=1500)
+    bank_without_id: bool=False
+    bank_received_at: str=Field(default='',max_length=24)
 
 class Resolve(BaseModel):
     success: bool
@@ -233,7 +241,7 @@ def create_order(p:NewOrder,uid:str=Depends(user)):
 
 @app.get('/api/payments/orders')
 def orders(uid:str=Depends(user)):
-    return {'orders':db().user_orders(uid)}
+    return {'orders':admin_topups().enrich_user_orders(db().user_orders(uid))}
 
 @app.post('/api/payments/orders/{order_id}/proof')
 def proof(order_id:str,file:UploadFile=File(...),uid:str=Depends(user)):
@@ -245,22 +253,60 @@ def proof(order_id:str,file:UploadFile=File(...),uid:str=Depends(user)):
         key=images().key(uid,'proofs',order_id+'-'+uuid.uuid4().hex,ext)
         images().put_proof(key,raw)
         db().proof(uid,order_id,key)
+        admin_topups().clear_clarification(order_id)
         return {'status':'review'}
     except (Conflict,ValueError) as exc:raise HTTPException(400,str(exc)) from exc
 
 @app.get('/api/admin/orders')
-def admin_orders(uid:str=Depends(admin)):
-    result=db().admin_orders()
-    for order in result:
-        order['proof_url']=images().url(order['proof_key']) if order.get('proof_key') else ''
-    return {'orders':result}
+def admin_orders(include_hidden:bool=False,uid:str=Depends(admin)):
+    return {'orders':admin_topups().list(include_hidden)}
+
+@app.get('/api/admin/orders/{order_id}')
+def admin_order_detail(order_id:str,uid:str=Depends(admin)):
+    try:
+        result=admin_topups().detail(order_id)
+        result['proof_url']=images().url(result['proof_key']) if result.get('proof_key') else ''
+        return result
+    except Conflict as exc:raise HTTPException(404,str(exc)) from exc
+
+class ClarifyOrder(BaseModel):
+    reason: str=Field(min_length=3,max_length=300)
 
 @app.post('/api/admin/orders/{order_id}/approve')
 def admin_approve(order_id:str,p:Approve,uid:str=Depends(admin)):
     if not config.flag('PAYMENTS_ENABLED'):raise HTTPException(503,'Пополнения отключены')
     try:
-        changed=db().approve(order_id,p.bank_reference,p.receipt,p.amount)
+        changed=admin_topups().approve(order_id,p.bank_reference,p.amount,p.receipt,
+            without_id=p.bank_without_id,received_at=p.bank_received_at,
+            receipt_url=p.receipt_url,receipt_number=p.receipt_number)
         return {'status':'paid','credited':changed}
+    except Conflict as exc:raise HTTPException(409,str(exc)) from exc
+
+@app.post('/api/admin/orders/{order_id}/clarify')
+def admin_clarify(order_id:str,p:ClarifyOrder,uid:str=Depends(admin)):
+    try:
+        admin_topups().clarify(order_id,p.reason)
+        return {'status':'clarify'}
+    except Conflict as exc:raise HTTPException(409,str(exc)) from exc
+
+@app.post('/api/admin/orders/{order_id}/cancel')
+def admin_cancel(order_id:str,uid:str=Depends(admin)):
+    try:return {'changed':admin_topups().set_flag(order_id,'cancel')}
+    except Conflict as exc:raise HTTPException(409,str(exc)) from exc
+
+@app.post('/api/admin/orders/{order_id}/hide')
+def admin_hide(order_id:str,uid:str=Depends(admin)):
+    try:return {'changed':admin_topups().set_flag(order_id,'hide')}
+    except Conflict as exc:raise HTTPException(409,str(exc)) from exc
+
+@app.post('/api/admin/orders/{order_id}/restore')
+def admin_restore(order_id:str,uid:str=Depends(admin)):
+    try:return {'changed':admin_topups().set_flag(order_id,'restore')}
+    except Conflict as exc:raise HTTPException(409,str(exc)) from exc
+
+@app.post('/api/admin/orders/{order_id}/archive')
+def admin_archive(order_id:str,uid:str=Depends(admin)):
+    try:return {'changed':admin_topups().set_flag(order_id,'archive')}
     except Conflict as exc:raise HTTPException(409,str(exc)) from exc
 
 @app.get('/api/admin/jobs')
