@@ -42,13 +42,23 @@ class Store:
         self.driver.stop()
 
     def query(self, query, **params):
+        prepared = {
+            "$" + key.lstrip("$"): value
+            for key, value in params.items()
+        }
         return rows(self.pool.execute_with_retries(
-            query, params, retry_settings=self.ydb.RetrySettings(idempotent=True)
+            query,
+            prepared,
+            retry_settings=self.ydb.RetrySettings(idempotent=True)
         ))
 
     @staticmethod
     def run(tx, query, **params):
-        with tx.execute(query, params) as response:
+        prepared = {
+            "$" + key.lstrip("$"): value
+            for key, value in params.items()
+        }
+        with tx.execute(query, prepared) as response:
             return rows(response)
 
     def transaction(self, fn):
