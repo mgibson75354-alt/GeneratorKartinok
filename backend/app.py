@@ -153,7 +153,12 @@ def history(uid:str=Depends(user)):
     # Provider audit already records the actual model, no YDB migration needed.
     records=db().query('SELECT job_id, model FROM igk_provider_audit WHERE user_id=$u',u=uid)
     models={row['job_id']:row.get('model','') for row in records}
+    # A request_id is needed by the client to distinguish a confirmed failed/refunded
+    # attempt from an uncertain result. It is already stored in igk_jobs.
+    ids=db().query('SELECT job_id, request_id FROM igk_jobs WHERE user_id=$u ORDER BY created_at DESC LIMIT 30',u=uid)
+    requests={row['job_id']:row['request_id'] for row in ids}
     for job in result['jobs']:
+        job['request_id']=requests.get(job['job_id'],'')
         job['model']=models.get(job['job_id'],'')
         job['image_url']=images().url(job['output_key']) if job.get('output_key') and job.get('status')=='completed' else None
     return result

@@ -284,18 +284,38 @@ $('generate').onclick = async () => {
     const data = await api('/api/generate', {method:'POST',
       headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
     if (data.status === 'completed' && safeHttps(data.image_url)) {
+      pendingRequestId = ''; // Completed jobs never need an idempotent retry.
       $('result-image').src = data.image_url;
       $('download').href = data.image_url;
       $('result-panel').classList.remove('hidden');
       message('Изображение создано!');
       $('result-panel').scrollIntoView({behavior:'smooth'});
+    } else if (data.status === 'failed') {
+      pendingRequestId = ''; // YDB confirms this job failed and its hold was released.
+      message('Генерация не удалась. Резерв возвращён. Можно попробовать ещё раз.', true);
     } else {
       message('Задание: ' + statusName(data.status) + '. Не создавайте повторную генерацию до проверки.');
     }
     await refresh();
   } catch (err) {
-    message(err.message + ' Повторная попытка с этой формой использует тот же номер запроса.', true);
-    try { await refresh(); } catch { /* preserve original error */ }
+    // Never create a second paid task after a mere HTTP/network error.
+    // The server confirms a refund by returning status=failed for THIS request_id.
+    let matchingJob = null;
+    try {
+      await refresh();
+      matchingJob = currentHistory.jobs.find(job => job.request_id === pendingRequestId);
+    } catch { /* If the status cannot be verified, retain the idempotency key. */ }
+    if (matchingJob?.status === 'failed') {
+      pendingRequestId = '';
+      message('Генерация не удалась. Резерв возвращён. Можно попробовать ещё раз.', true);
+    } else if (matchingJob?.status === 'completed') {
+      pendingRequestId = '';
+      message('Изображение создано. Откройте результат в архиве.');
+    } else if (matchingJob?.status === 'reserved' || matchingJob?.status === 'unknown') {
+      message('Задание ещё выполняется или требует проверки. Не отправляйте новую генерацию.', true);
+    } else {
+      message(err.message + ' Статус задания не подтверждён. Повторная попытка использует тот же номер запроса.', true);
+    }
   } finally { busy = false; check(); }
 };
 $('new-image').onclick = () => {
