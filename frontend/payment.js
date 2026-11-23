@@ -17,6 +17,35 @@ async function api(path,{method='GET',body=null}={}) {
   return result;
 }
 function info(id,text,isError=false) {const n=$(id);n.textContent=text;n.classList.toggle('error',isError);}
+// Compare the user's stated amount with the selected application, not OCR.
+// A bank receipt image cannot be reliably read or verified in the browser.
+function actualAmountKopeks(){
+  const raw=$('pay-actual-amount').value.trim().replace(/\s/g,'').replace(',','.');
+  if(!/^(?:0|[1-9]\d{0,8})(?:\.\d{1,2})?$/.test(raw))return null;
+  const [major,minor='']=raw.split('.');
+  const value=Number(major)*100+Number(minor.padEnd(2,'0'));
+  return Number.isSafeInteger(value)&&value>0?value:null;
+}
+function checkAmountMatch(){
+  const warning=$('pay-amount-warning');
+  const typed=$('pay-actual-amount').value.trim();
+  warning.classList.toggle('hidden',!typed || !currentOrder);
+  if(!typed || !currentOrder){warning.textContent='';return false;}
+  const actual=actualAmountKopeks();
+  const expected=Number(currentOrder.amount);
+  if(actual===null){
+    warning.textContent='Укажите сумму чека в рублях, например 50,00.';
+    warning.classList.add('error');return false;
+  }
+  if(actual!==expected){
+    warning.textContent=`Внимание! Сумма заявки — ${rubles(expected)}, а указанная вами оплата — ${rubles(actual)}. Вы можете отправить чек. Администратор проверит фактическое поступление в ВТБ и начислит кредиты только на подтверждённую сумму.`;
+    warning.classList.remove('error');return true;
+  }
+  warning.textContent='';warning.classList.add('hidden');warning.classList.remove('error');
+  return true;
+}
+$('pay-actual-amount').addEventListener('input',checkAmountMatch);
+
 async function login() {
   $('retry').classList.add('hidden');
   try {
@@ -43,6 +72,7 @@ function clearSelectedOrder() {
   $('pay-order').classList.add('hidden');
   $('pay-start').classList.remove('hidden');
   $('pay-proof-file').value='';
+  $('pay-actual-amount').value='';checkAmountMatch();
   info('pay-message','');
 }
 async function loadOrders(){
@@ -64,7 +94,8 @@ async function loadOrders(){
       $('pay-proof').classList.toggle('hidden',!actionable);
       $('pay-qr-button').classList.toggle('hidden',!actionable||(!paymentQr&&!paymentLink));
       $('pay-start').classList.toggle('hidden',actionable);
-      if(!actionable)$('pay-proof-file').value='';
+      if(!actionable){$('pay-proof-file').value='';$('pay-actual-amount').value='';}
+      checkAmountMatch();
       info('pay-message',updated.status==='clarify'?('Требуется уточнение: '+(updated.clarify_reason||'Загрузите новое подтверждение.')):'');
     }else{
       currentOrder=updated;
@@ -84,6 +115,7 @@ async function loadOrders(){
     list.append(button);
   }
   if(!orders.length)list.textContent='Заявок пока нет.';
+  checkAmountMatch();
 }
 function showOrder(o){
   if(o.status==='cancelled'||o.status==='canceled'){clearSelectedOrder();return;}
@@ -95,6 +127,7 @@ function showOrder(o){
   $('pay-qr-button').classList.toggle('hidden',!actionable||(!paymentQr&&!paymentLink));
   $('pay-start').classList.toggle('hidden',actionable);
   $('pay-proof-file').value='';
+  $('pay-actual-amount').value='';checkAmountMatch();
   info('pay-message',o.status === 'clarify' ? ('Требуется уточнение: '+(o.clarify_reason||'Загрузите новое подтверждение.')) : '');
   $('pay-my-orders').querySelectorAll('.payment-order-card').forEach(b=>b.classList.toggle('selected',b.dataset.orderId===o.order_id));
 }
@@ -106,19 +139,70 @@ $('pay-start').onclick=async()=>{
     currentOrder=o;await loadOrders();showOrder(o);info('pay-message','Заявка создана. Оплатите по СБП, затем приложите банковский чек.');
   }catch(err){info('pay-message',err.message,true);}finally{b.disabled=false;}
 };
+// Serverless upload requests are size-limited before FastAPI receives them.
+// Compress only bank-receipt images; never alter PDFs or payment amounts.
+const MAX_PROOF_ORIGINAL = 8 * 1024 * 1024;
+const MAX_PROOF_IMAGE_UPLOAD = 400 * 1024;
+const MAX_PROOF_PDF_UPLOAD = 2 * 1024 * 1024;
+async function preparePaymentProof(file) {
+  if (!file || !['image/jpeg','image/png','application/pdf'].includes(file.type) || file.size < 1 || file.size > MAX_PROOF_ORIGINAL) {
+    throw Error('Выберите JPG, PNG или PDF размером до 8 МБ.');
+  }
+  if (file.type === 'application/pdf') {
+    if (file.size > MAX_PROOF_PDF_UPLOAD) {
+      throw Error('PDF превышает 2 МБ. Сохраните более компактный PDF либо приложите фотографию чека в JPG.');
+    }
+    return file;
+  }
+  if (file.size <= MAX_PROOF_IMAGE_UPLOAD) return file;
+  const url=URL.createObjectURL(file);
+  let img;
+  try {
+    img=new Image();
+    await new Promise((resolve,reject)=>{
+      img.onload=resolve;
+      img.onerror=()=>reject(Error('Не удалось открыть изображение чека. Выберите другой JPG или PNG.'));
+      img.src=url;
+    });
+    if (!img.naturalWidth || !img.naturalHeight) throw Error('Изображение чека пустое.');
+    const sizes=[2200,1900,1700,1500,1300,1100];
+    const qualities=[0.88,0.83,0.78,0.73,0.68,0.62];
+    for(let i=0;i<sizes.length;i++) {
+      const scale=Math.min(1,sizes[i]/Math.max(img.naturalWidth,img.naturalHeight));
+      const canvas=document.createElement('canvas');
+      canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));
+      canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));
+      const ctx=canvas.getContext('2d');
+      if(!ctx) throw Error('Браузер не поддерживает подготовку изображения чека.');
+      ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(img,0,0,canvas.width,canvas.height);
+      const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',qualities[i]));
+      if(!blob) throw Error('Не удалось подготовить изображение чека.');
+      if(blob.size <= MAX_PROOF_IMAGE_UPLOAD) {
+        return new File([blob],(file.name||'receipt').replace(/\.[^.]+$/,'')+'.jpg',{type:'image/jpeg',lastModified:Date.now()});
+      }
+    }
+    throw Error('Не удалось уменьшить чек для отправки. Сохраните его как JPG меньшего размера.');
+  } finally { URL.revokeObjectURL(url); }
+}
+
 $('pay-submit').onclick=async()=>{
   if(!currentOrder)return;
-  const file=$('pay-proof-file').files?.[0];
-  if(!file || !['image/jpeg','image/png','application/pdf'].includes(file.type) || file.size<1 || file.size>8*1024*1024){
-    info('pay-message','Выберите JPG, PNG или PDF размером до 8 МБ.',true);return;
+  if(!checkAmountMatch()){
+    info('pay-message','Укажите фактически оплаченную сумму из банковского чека.',true);
+    return;
   }
+  const file=$('pay-proof-file').files?.[0];
   const b=$('pay-submit');b.disabled=true;
   try{
-    const form=new FormData();form.append('file',file);
+    info('pay-message','Подготавливаем чек к отправке…');
+    const prepared=await preparePaymentProof(file);
+    const form=new FormData();form.append('file',prepared,prepared.name);
+    info('pay-message','Отправляем подтверждение оплаты…');
     await api(`/api/payments/orders/${encodeURIComponent(currentOrder.order_id)}/proof`,{method:'POST',body:form});
     currentOrder=null;$('pay-order').classList.add('hidden');$('pay-start').classList.remove('hidden');
     info('pay-message','Подтверждение отправлено на проверку по выписке ВТБ.');await loadOrders();await refreshBalance();
-  }catch(err){info('pay-message',err.message,true);}finally{b.disabled=false;}
+  }catch(err){info('pay-message',/HTTP 413/.test(err.message)?'Сервер отклонил файл из-за ограничения размера (HTTP 413). Попробуйте более компактный JPG или обратитесь к администратору.':err.message,true);}finally{b.disabled=false;}
 };
 $('pay-qr-button').onclick=async()=>{
   if(!currentOrder || (!paymentQr&&!paymentLink))return;

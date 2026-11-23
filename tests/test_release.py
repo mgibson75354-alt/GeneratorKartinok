@@ -84,7 +84,7 @@ assert 'Опишите нейросети свою идею' in html
 assert 'Приветственный бонус 3 кредитов' not in html
 assert 'Файл будет загружен в закрытое хранилище.' not in html
 assert 'Модели работают через reAPI. Стоимость в кредитах указана ниже.' not in html
-assert 'ЦИФРОВОЕ АТЕЛЬЕ · MAX' not in html
+assert 'ЦИФРОВАЯ СТУДИЯ ДИЗАЙНА · MAX' not in html
 assert 'Стоимость одной генерации' not in html and 'Стоимость генерации' in html
 assert '03 / АРХИВ' in html and '04 / БАЛАНС' in html
 assert 'id="pay-admin"' not in (root/'frontend/payment.html').read_text()

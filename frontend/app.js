@@ -489,11 +489,15 @@ $('admin-approve').onclick = async () => {
   if (reference.length < 6) return warn('Укажите номер или описание перевода из выписки ВТБ.');
   if (noId && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(receivedAt))
     return warn('Укажите дату и время фактического поступления из выписки ВТБ.');
-  if (!Number.isSafeInteger(amount) || amount !== Number(selectedAdminOrder.amount))
-    return warn('Сумма по выписке ВТБ должна совпадать с суммой заявки.');
+  if (!Number.isSafeInteger(amount) || amount <= 0)
+    return warn('Укажите положительную фактически поступившую сумму по выписке ВТБ.');
   if (!receiptNumber && !receiptUrl) return warn('Перед начислением оформите чек НПД и укажите его номер или ссылку.');
   if (receiptUrl && !safeHttps(receiptUrl)) return warn('Ссылка на чек должна начинаться с https://');
-  if (!window.confirm('Поступление денег подтверждено в выписке ВТБ, чек НПД оформлен? Начислить кредиты?')) return;
+  const difference = amount !== Number(selectedAdminOrder.amount);
+  const question = difference
+    ? `Сумма заявки: ${rubles(selectedAdminOrder.amount)}. Фактически в ВТБ: ${rubles(amount)}. Начислить только ${credits(amount)} по фактическому поступлению? Чек НПД оформлен на ${rubles(amount)}?`
+    : `Поступление ${rubles(amount)} подтверждено в ВТБ, чек НПД оформлен? Начислить ${credits(amount)}?`;
+  if (!window.confirm(question)) return;
   const b = $('admin-approve'); b.disabled = true;
   try {
     await api('/api/admin/orders/' + encodeURIComponent(selectedAdminOrder.order_id) + '/approve', {

@@ -223,6 +223,8 @@ class Store:
         return cleaned
 
     def approve(self,order_id,reference,receipt,amount):
+        amount=int(amount)
+        if amount <= 0: raise Conflict('Фактическая сумма поступления должна быть положительной')
         reference=self.bank_reference(reference)
         if not receipt or len(receipt)>300: raise Conflict('Укажите номер или ссылку чека НПД')
         def operation(tx):
@@ -236,14 +238,17 @@ class Store:
             if not rows: raise Conflict('Заявка не найдена')
             order=rows[0]
             if order['status']!='review': raise Conflict('Подтверждение клиента не получено или заявка завершена')
-            if int(order['amount'])!=int(amount): raise Conflict('Фактическая сумма ВТБ не совпадает с заявкой')
+            original_amount=int(order['amount'])
             wallet=self.run(tx,'SELECT available FROM igk_wallets WHERE user_id=$u',u=order['user_id'])
             if not wallet: raise Conflict('Кошелёк клиента не найден')
             self.run(tx,'INSERT INTO igk_bank_refs (reference,order_id,created_at) VALUES ($r,$id,$t)',r=reference,id=order_id,t=now())
             self.run(tx,'UPDATE igk_wallets SET available=$a WHERE user_id=$u',
                      a=int(wallet[0]['available'])+int(amount),u=order['user_id'])
-            self.run(tx,"UPDATE igk_topups SET status='paid',bank_reference=$r,receipt=$c,confirmed_at=$t WHERE order_id=$id",
-                     r=reference,c=receipt,t=now(),id=order_id)
-            self._movement(tx,order['user_id'],'topup',int(amount),'Подтверждённое пополнение',order_id)
+            self.run(tx,"UPDATE igk_topups SET status='paid',amount=$actual,bank_reference=$r,receipt=$c,confirmed_at=$t WHERE order_id=$id",
+                     actual=amount,r=reference,c=receipt,t=now(),id=order_id)
+            self._movement(tx,order['user_id'],'topup',amount,
+                'Подтверждённое пополнение' if original_amount==amount else
+                f'Подтверждённое пополнение; исходная заявка {original_amount/100:.2f} ₽; поступило {amount/100:.2f} ₽',
+                order_id)
             return True
         return self.transaction(operation)

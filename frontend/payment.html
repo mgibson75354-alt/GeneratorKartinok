@@ -6,7 +6,7 @@
 <script src="https://st.max.ru/js/max-web-app.js"></script><script src="config.js"></script>
 </head><body class="payment-page">
 <main class="wrap">
-<header class="masthead"><span class="brand-mark">✦</span><div><span class="eyebrow">ЦИФРОВОЕ АТЕЛЬЕ</span><h1>Пополнение баланса</h1><p>Оплата по СБП и подтверждение платежа</p></div></header>
+<header class="masthead"><span class="brand-mark">✦</span><div><span class="eyebrow">ЦИФРОВАЯ СТУДИЯ ДИЗАЙНА</span><h1>Пополнение баланса</h1><p>Оплата по СБП и подтверждение платежа</p></div></header>
 <section class="panel" id="gate"><span class="tag">Проверка доступа</span><h2 id="gate-title">Подключаемся…</h2><p id="gate-message" class="muted">Проверяем MAX.</p><button id="retry" class="button outline hidden" type="button">Повторить</button></section>
 <div id="workspace" class="hidden">
 <a class="button outline back-link" href="index.html">← Вернуться к генерации</a>
@@ -19,7 +19,7 @@
 <div id="pay-order" class="pay-order-detail hidden" tabindex="-1" aria-live="polite">
 <p id="pay-order-summary"></p>
 <button type="button" id="pay-qr-button" class="button outline sbp-button"><span>Оплатить кредиты по СБП</span><span class="sbp-mini-mark" aria-hidden="true"><i></i><i></i><i></i></span></button>
-<div id="pay-proof"><label for="pay-proof-file">Прикрепите чек об оплате из банковского приложения (JPG, PNG или PDF до 8 МБ)</label><input id="pay-proof-file" type="file" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"><button type="button" id="pay-submit" class="button outline payment-action-outline">Отправить подтверждение оплаты</button></div>
+<div id="pay-proof"><label for="pay-proof-file">Прикрепите чек об оплате (JPG, PNG до 8 МБ — изображение будет оптимизировано; PDF до 2 МБ)</label><input id="pay-proof-file" type="file" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"><label for="pay-actual-amount">Сумма фактической оплаты по банковскому чеку, ₽</label><input id="pay-actual-amount" type="text" inputmode="decimal" maxlength="12" autocomplete="off" placeholder="Например, 50,00" aria-describedby="pay-amount-warning"><p id="pay-amount-warning" class="status hidden" role="alert" aria-live="polite"></p><button type="button" id="pay-submit" class="button outline payment-action-outline">Отправить подтверждение оплаты</button></div>
 </div>
 <p id="pay-message" class="status" aria-live="polite"></p>
 <h3>Мои заявки</h3><div id="pay-my-orders" class="payment-order-list" tabindex="0">Заявок пока нет.</div>
@@ -27,7 +27,7 @@
 <p class="fine">Подтверждение клиента не означает зачисление: администратор сверяет поступление с выпиской ВТБ, после чего начисляет кредиты.</p>
 </section>
 </div>
-<footer><span>ИИ-ГенераторКартинок - цифровое ателье · Создано для канала ИИ-услуги и цифровые решения в MAX</span><div class="legal-links"><a data-legal href="legal/offer.html">Публичная оферта</a><a data-legal href="legal/privacy.html">Конфиденциальность</a><a data-legal href="legal/refunds.html">Возвраты</a></div></footer>
+<footer><span>ИИ-ГенераторКартинок - цифровая студия дизайна · Создано для канала ИИ-услуги и цифровые решения в MAX</span><div class="legal-links"><a data-legal href="legal/offer.html">Публичная оферта</a><a data-legal href="legal/privacy.html">Конфиденциальность</a><a data-legal href="legal/refunds.html">Возвраты</a></div></footer>
 </main>
 <div id="pay-qr-modal" class="overlay sbp-dialog hidden" role="dialog" aria-modal="true" aria-label="Оплата по СБП">
   <div class="modal sbp-layout">
@@ -56,5 +56,5 @@
   </div>
 </div>
 <div id="legal-overlay" class="overlay hidden" role="dialog" aria-modal="true" aria-label="Юридический документ"><div class="modal legal-modal"><div class="modal-top"><strong>Документы ИИ-ГенератораКартинок</strong><button type="button" class="button outline" id="legal-close">← Вернуться к пополнению</button></div><iframe id="legal-frame" title="Юридический документ" loading="lazy"></iframe></div></div>
-<script src="payment.js?v=igk-v18-legal"></script>
+<script src="payment.js?v=igk-v27-paid-amount"></script>
 </body></html>

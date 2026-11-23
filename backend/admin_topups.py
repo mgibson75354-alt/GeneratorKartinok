@@ -169,7 +169,7 @@ class AdminTopups:
         order = self.detail(order_id)
         if order['status'] != 'review':
             raise Conflict('Заявка не находится на банковской проверке')
-        if int(order['amount']) != int(amount): raise Conflict('Сумма поступления не соответствует заявке')
+        if int(amount) <= 0: raise Conflict('Фактически поступившая сумма должна быть положительной')
         actual_ref = self.reference_for_payment(reference, without_id, received_at, amount)
         text = self.check_receipt(receipt_url, receipt_number, receipt)
         # CRITICAL: financial idempotency and credit remain exclusively in
