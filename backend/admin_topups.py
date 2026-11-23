@@ -172,6 +172,18 @@ class AdminTopups:
         if int(amount) <= 0: raise Conflict('Фактически поступившая сумма должна быть положительной')
         actual_ref = self.reference_for_payment(reference, without_id, received_at, amount)
         text = self.check_receipt(receipt_url, receipt_number, receipt)
+        # Friendly preflight for an already registered bank operation.  This is
+        # read-only; it does NOT replace the atomic uniqueness check in
+        # Store.approve(), which still handles simultaneous requests safely.
+        normalized_ref = self.store.bank_reference(actual_ref)
+        bank_rows = self.store.query(
+            'SELECT order_id FROM igk_bank_refs WHERE reference=$r',
+            r=normalized_ref,
+        )
+        if bank_rows:
+            if bank_rows[0]['order_id'] != order_id:
+                raise Conflict('Банковская операция уже использована для другой заявки. Повторное начисление невозможно.')
+            raise Conflict('Эта банковская операция уже подтверждена. Повторное начисление невозможно.')
         # CRITICAL: financial idempotency and credit remain exclusively in
         # existing Store.approve() serializable transaction.
         changed = self.store.approve(order_id, actual_ref, text, amount)
