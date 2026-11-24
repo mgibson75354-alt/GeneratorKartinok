@@ -350,5 +350,43 @@
     .sbp-dialog .sbp-qr-card {min-height: 0;}
 }
 
-/* Payment page: space between receipt-file picker and confirmation button. */
-.payment-page #payment-panel #pay-submit { margin-top: 14px; }
+
+
+/* IGK responsive viewport: keep the original vertical page and proportions.
+   This changes document layout only, not the MAX mini-app host window. */
+html, body { min-width: 0; max-width: 100%; }
+.wrap, #workspace, .panel, .masthead, .masthead > div,
+.balance-panel > div, .grid-two, .grid-two > *, .action-row,
+.history-list, .price-line, .consent-panel, .reference-panel,
+.modal, .legal-modal { min-width: 0; }
+.wrap { width: 100%; }
+.masthead h1, .masthead p, .balance, .panel h2,
+.history-item, .price-line, .consent, .modal {
+  overflow-wrap: anywhere;
+}
+.result-image, .mini-preview { height: auto; max-width: 100%; }
+
+/* Rotate with device if MAX exposes a rotated viewport.
+   No new columns or reordered screens: portrait layout stretches to fit. */
+@media screen and (orientation: landscape) and (max-height: 650px) {
+  .wrap {
+    width: 100%;
+    max-width: 100%;
+    margin: 0 auto;
+    padding: 12px clamp(10px, 2vw, 20px) 30px;
+  }
+  .panel { width: 100%; max-width: 100%; padding: 18px; }
+  .masthead { margin: 5px 0 18px; gap: 11px; }
+  .masthead h1 { font-size: clamp(24px, 4vw, 36px); }
+  .grid-two { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .balance-panel { gap: 12px; }
+  .balance-actions { align-items: stretch; width: 100%; }
+  .balance-actions .button { width: 100%; }
+  .action-row { flex-direction: column; }
+  .action-row > * { width: 100%; }
+  .price-line { flex-wrap: wrap; }
+  textarea { min-height: 90px; }
+  .result-image { max-height: 75dvh; }
+  .mini-preview { max-height: 55dvh; }
+  .modal { width: 100%; max-height: 90dvh; }
+}
