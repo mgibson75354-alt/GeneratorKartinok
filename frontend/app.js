@@ -69,7 +69,7 @@ function check() {
 }
 async function login() {
   $('retry').classList.add('hidden');
-  $('gate-title').textContent = 'Проверяем доступ…';
+  $('gate-title').textContent = 'Проверяем подключение…';
   try {
     const init = window.WebApp?.initData;
     if (!init) throw Error('Откройте мини-приложение кнопкой внутри MAX, не прямой ссылкой.');

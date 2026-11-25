@@ -31,7 +31,7 @@ def admin_topups():return AdminTopups(db())
 
 def user(x_app_authorization: str | None=Header(None,alias='X-App-Authorization')):
     if not x_app_authorization or not x_app_authorization.startswith('Bearer '):
-        raise HTTPException(401,'Необходим вход через MAX')
+        raise HTTPException(401,'Вход в приложение только через MAX')
     try:return auth.verify(x_app_authorization[7:])
     except auth.AuthError as exc: raise HTTPException(401,str(exc)) from exc
 
@@ -96,7 +96,7 @@ def signin(payload:SignIn):
         uid=identity['user_id']
         if config.flag('REQUIRE_CHANNEL_SUBSCRIPTION','1'):
             if not auth.is_subscriber(uid,os.environ['MAX_BOT_TOKEN'],os.getenv('MAX_CHANNEL_ID')):
-                raise HTTPException(403,'Подпишитесь на канал MAX для доступа')
+                raise HTTPException(403,'Приложению необходима подписка на канал')
         try:
             db().register(
                 uid,

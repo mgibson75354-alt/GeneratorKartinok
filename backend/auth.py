@@ -6,7 +6,7 @@ import requests
 class AuthError(Exception): pass
 
 def validate_max_init_data(raw: str, bot_token: str, now=None):
-    if not raw or not bot_token or len(raw)>20000: raise AuthError('Авторизация MAX недоступна')
+    if not raw or not bot_token or len(raw)>20000: raise AuthError('БД недоступна')
     pairs=parse_qsl(raw,keep_blank_values=True,strict_parsing=True)
     params=dict(pairs)
     if len(pairs)!=len(params) or not params.get('hash'): raise AuthError('Ошибка подписи MAX')
